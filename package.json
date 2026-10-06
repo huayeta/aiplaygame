@@ -1,0 +1,12 @@
+{
+  "name": "ai-game-live-client",
+  "version": "0.1.0",
+  "description": "H5 小游戏库 + 自动玩（录制/回放）客户端",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "latest"
+  }
+}

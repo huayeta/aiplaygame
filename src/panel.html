@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>自动玩控制台</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  body { background: #15162a; color: #e8e9f5; padding: 18px; }
+  h2 { font-size: 17px; margin-bottom: 4px; }
+  .sub { font-size: 12px; color: #8a90b8; margin-bottom: 16px; }
+  .sec { background: #1d1f38; border-radius: 14px; padding: 14px; margin-bottom: 14px; }
+  .sec .t { font-size: 12px; color: #9aa0c8; margin-bottom: 10px; }
+  button { width: 100%; padding: 11px; border: none; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; margin-bottom: 8px; color: #fff; }
+  .rec { background: linear-gradient(135deg,#ff5ca8,#e11d48); }
+  .mark { background: #3a3d63; }
+  .undo { background: #7c5cff; }
+  .stoprec { background: #6b7280; }
+  .play { background: linear-gradient(135deg,#22d39a,#16a34a); }
+  .stop { background: linear-gradient(135deg,#f59e0b,#d97706); }
+  .shot { background: #3a3d63; }
+  .row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; font-size: 13px; }
+  .row .num { width: 54px; text-align: center; background: #0f1020; color: #fff; border: 1px solid #2a2d48; border-radius: 6px; padding: 5px; margin: 0 6px; font-size: 13px; }
+  select, input[type=range] { width: 130px; }
+  select { padding: 6px; border-radius: 8px; background: #0f1020; color: #e8e9f5; border: 1px solid #2a2d52; }
+  .check { display: flex; align-items: center; gap: 8px; font-size: 13px; margin-bottom: 8px; }
+  .status { background: #0f1020; border-radius: 10px; padding: 12px; font-size: 13px; min-height: 46px; line-height: 1.5; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #555; margin-right: 6px; }
+  .dot.on { background: #22d3ee; }
+  .dot.rec { background: #ff4d6d; }
+  .hint { font-size: 11px; color: #6b7094; line-height: 1.6; margin-top: 6px; }
+  .cur { font-size: 13px; font-weight: 700; color: #ff5ca8; margin-bottom: 6px; min-height: 18px; }
+  .lvlList { margin-bottom: 8px; }
+  .lvlItem { display: flex; align-items: center; justify-content: space-between; background: #0f1020; border-radius: 8px; padding: 7px 10px; margin-bottom: 6px; font-size: 13px; }
+  .lvlItem .nm { flex: 1; }
+  .lvlItem .cnt { color: #8a90b8; font-size: 12px; margin-right: 8px; }
+  .lvlItem button { width: auto; padding: 5px 10px; font-size: 12px; margin-bottom: 0; margin-left: 6px; }
+  .lvlItem .tst { background: #00c48c; }
+  .lvlItem .rl { background: #7c5cff; }
+  .lvlItem .dl { background: #e11d48; }
+  .lvlEmpty { color: #6b7094; font-size: 12px; padding: 8px; }
+</style>
+</head>
+<body>
+  <h2>自动玩控制台</h2>
+  <div class="sub"><span class="dot" id="dot"></span><span id="state">就绪</span></div>
+
+  <div class="sec">
+    <div class="t">录制脚本（真人玩一遍，录下点击）</div>
+    <button class="rec" id="recStart">● 开始录制</button>
+    <button class="mark" id="recMark">＋ 标记下一关（过一关切新关时点一下）</button>
+    <button class="undo" id="recUndo">↩ 撤销上一关（重新录）</button>
+    <button class="stoprec" id="recStop">■ 保存并停止</button>
+    <label class="check"><input type="checkbox" id="autoMark"> 自动标记关卡（切到新棋盘自动分关，默认关）</label>
+  </div>
+
+  <div class="sec">
+    <div class="t">脚本关卡管理（已保存的脚本）</div>
+    <div class="cur" id="curLvl"></div>
+    <div class="lvlList" id="lvlList"><div class="lvlEmpty">暂无关卡，先录制并保存</div></div>
+  </div>
+
+  <div class="sec">
+    <div class="t">自动玩回放</div>
+    <div class="row">从第 <input type="number" id="playFrom" class="num" value="1" min="1"> 关开始自动玩</div>
+    <button class="play" id="playStart">▶ 开始自动玩</button>
+    <button class="stop" id="playStop">■ 停止</button>
+  </div>
+
+  <div class="sec">
+    <div class="t">选项</div>
+    <div class="row">
+      <span>点击方式</span>
+      <select id="method">
+        <option value="cdp">CDP真实点击(推荐)</option>
+        <option value="soft">软点击(注入JS)</option>
+      </select>
+    </div>
+    <div class="row">
+      <span>速度 <b id="speedVal">1.0x</b></span>
+      <input type="range" id="speed" min="0.5" max="3" step="0.5" value="1">
+    </div>
+    <label class="check"><input type="checkbox" id="loop" checked> 播完循环</label>
+    <label class="check"><input type="checkbox" id="askStart" checked> 每次打开都询问</label>
+    <label class="check"><input type="checkbox" id="freshAlways"> 总是重新开始新游戏</label>
+    <button class="shot" id="shot">📷 截图（存模板）</button>
+    <div class="hint">软点击失效时改 CDP；速度仅缩短点击间隔。</div>
+  </div>
+
+  <div class="sec">
+    <div class="t">状态</div>
+    <div class="status" id="status">等待操作…</div>
+  </div>
+
+<script>
+  const $ = id => document.getElementById(id);
+  $('recStart').onclick = () => window.panel.recStart();
+  $('recMark').onclick = () => window.panel.recMark();
+  $('recUndo').onclick = () => window.panel.recUndo();
+  $('recStop').onclick = () => window.panel.recStop();
+  $('playStart').onclick = () => window.panel.playStart(parseInt($('playFrom').value) || 1);
+  $('playStop').onclick = () => window.panel.playStop();
+  $('shot').onclick = () => window.panel.capture();
+
+  $('method').onchange = e => window.panel.setOption({ method: e.target.value });
+  $('speed').oninput = e => {
+    const v = parseFloat(e.target.value);
+    $('speedVal').textContent = v.toFixed(1) + 'x';
+    window.panel.setOption({ speed: v });
+  };
+  $('loop').onchange = e => window.panel.setOption({ loop: e.target.checked });
+  $('autoMark').onchange = e => window.panel.setOption({ autoMark: e.target.checked });
+  $('askStart').onchange = e => {
+    if (e.target.checked) { $('freshAlways').checked = false; window.panel.setOption({ freshStart: false }); }
+    window.panel.setOption({ askEveryStart: e.target.checked });
+  };
+  $('freshAlways').onchange = e => {
+    if (e.target.checked) { $('askStart').checked = false; window.panel.setOption({ askEveryStart: false }); }
+    window.panel.setOption({ freshStart: e.target.checked });
+  };
+
+  // 关卡管理（实时更新，每次动作自动刷新）
+  function renderLevels(data) {
+    const list = data ? data.levels : null;
+    // 当前正在录制第几关
+    const cur = $('curLvl');
+    if (data && data.recording && data.current) {
+      cur.textContent = '● 当前正在录制：L' + data.current;
+    } else {
+      cur.textContent = '';
+    }
+    const box = $('lvlList');
+    if (!list || !list.length) { box.innerHTML = '<div class="lvlEmpty">暂无关卡，先录制并保存</div>'; return; }
+    box.innerHTML = '';
+    list.forEach((l, i) => {
+      const row = document.createElement('div');
+      row.className = 'lvlItem';
+      // 正在处理的关高亮（录制中正在录的关 / 测试中正在推进或测试的关），统一粉色
+      if ((data && data.highlight === i + 1) || (data && data.recording && data.current === i + 1)) {
+        row.style.outline = '1px solid #ff5ca8';
+      }
+      row.innerHTML = '<span class="nm">' + l.name + '</span><span class="cnt">' + l.taps + ' 点</span>' +
+        '<button class="tst">测试</button><button class="rl">重录</button><button class="dl">删</button>';
+      row.querySelector('.tst').onclick = () => window.panel.scriptTest(i);
+      row.querySelector('.rl').onclick = () => window.panel.scriptReRecord(i);
+      row.querySelector('.dl').onclick = () => { if (confirm('删除 ' + l.name + '？')) window.panel.scriptDeleteLevel(i); };
+      box.appendChild(row);
+    });
+  }
+  window.panel.onLevels(renderLevels);
+  window.panel.scriptInfo().then(renderLevels); // 首次加载（之后靠实时推送）
+
+  window.panel.onStatus(d => {
+    $('status').textContent = d.text || '';
+    const dot = $('dot');
+    dot.className = 'dot' + (d.recording ? ' rec' : d.playing ? ' on' : '');
+    $('state').textContent = d.recording ? '录制中' : d.playing ? '自动玩中' : '就绪';
+  });
+</script>
+</body>
+</html>

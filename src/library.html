@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>AI游戏智播</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  body { background: radial-gradient(1200px 600px at 70% -10%, #1d2148 0%, #0f1020 55%); color: #e8e9f5; min-height: 100vh; }
+  .topbar { display: flex; align-items: center; gap: 14px; padding: 22px 34px; }
+  .logo { display: flex; align-items: center; gap: 12px; font-size: 22px; font-weight: 700; }
+  .logo .icon { width: 42px; height: 42px; border-radius: 12px; background: linear-gradient(135deg,#8b5cff,#ff5ca8); display:flex; align-items:center; justify-content:center; font-size: 22px; }
+  .search { flex: 1; max-width: 420px; margin-left: 30px; }
+  .search input { width: 100%; padding: 12px 18px; border-radius: 12px; border: 1px solid #2a2d52; background: #161833; color: #e8e9f5; font-size: 15px; outline: none; }
+  .add-btn { margin-left: auto; padding: 12px 22px; border-radius: 12px; border: none; background: linear-gradient(135deg,#22d39a,#16a34a); color: #fff; font-size: 15px; font-weight: 600; cursor: pointer; }
+  .head { padding: 6px 34px 18px; }
+  .head h1 { font-size: 30px; }
+  .head p { color: #9aa0c8; margin-top: 6px; font-size: 14px; }
+  .cats { display: flex; gap: 10px; padding: 0 34px 20px; flex-wrap: wrap; }
+  .cat-btn { display: flex; align-items: center; gap: 7px; padding: 8px 18px; border-radius: 20px; border: 1px solid #2a2d52; background: #1a1c33; color: #9aa0c8; cursor: pointer; font-size: 13px; transition: all .15s; }
+  .cat-btn:hover { color: #e8e9f5; }
+  .cat-btn.active { background: linear-gradient(135deg,#8b5cff,#ff5ca8); border-color: transparent; color: #fff; font-weight: 600; }
+  .cat-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; padding: 8px 34px 40px; }
+  .card { border-radius: 18px; padding: 22px; min-height: 150px; display: flex; flex-direction: column; justify-content: space-between; cursor: pointer; transition: transform .15s, box-shadow .15s; }
+  .card:hover { transform: translateY(-4px); box-shadow: 0 14px 30px rgba(0,0,0,.4); }
+  .card .tag { align-self: flex-start; font-size: 12px; background: rgba(255,255,255,.22); padding: 3px 10px; border-radius: 20px; }
+  .card h3 { font-size: 20px; margin-top: 12px; }
+  .card p { font-size: 13px; opacity: .85; margin-top: 6px; }
+  .card .row { display: flex; align-items: center; justify-content: space-between; margin-top: 16px; }
+  .card .cat { font-size: 12px; opacity: .9; }
+  .card .ops { display: flex; gap: 8px; align-items: center; }
+  .card .ops button { padding: 6px 12px; border-radius: 14px; border: none; cursor: pointer; font-size: 12px; }
+  .card .ops .edit { background: rgba(255,255,255,.35); color: #fff; }
+  .card .ops .del { background: rgba(225,29,72,.9); color: #fff; }
+  .start { padding: 8px 18px; border-radius: 20px; border: none; background: rgba(255,255,255,.9); color: #222; font-weight: 600; cursor: pointer; }
+  .empty { grid-column: 1/-1; text-align:center; color:#8a90b8; padding: 60px; }
+  /* modal */
+  .modal-mask { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.55); align-items: center; justify-content: center; }
+  .modal { width: 420px; background: #161833; border: 1px solid #2a2d52; border-radius: 18px; padding: 26px; }
+  .modal h3 { margin-bottom: 18px; }
+  .modal label { display:block; font-size: 13px; color: #9aa0c8; margin: 12px 0 6px; }
+  .modal input { width: 100%; padding: 11px 14px; border-radius: 10px; border: 1px solid #2a2d52; background: #0f1020; color: #e8e9f5; outline: none; }
+  .modal .actions { display:flex; gap: 12px; justify-content: flex-end; margin-top: 22px; }
+  .modal button { padding: 10px 20px; border-radius: 10px; border: none; cursor: pointer; font-weight: 600; }
+  .cancel { background: #2a2d52; color: #cfd2ee; }
+  .ok { background: linear-gradient(135deg,#22d39a,#16a34a); color:#fff; }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="logo"><div class="icon">🎮</div>AI游戏智播</div>
+    <div class="search"><input id="search" placeholder="搜索游戏名称…"></div>
+    <button class="add-btn" id="addBtn">+ 添加游戏</button>
+  </div>
+  <div class="head">
+    <h1>游戏库</h1>
+    <p>点卡片「开始」打开游戏（9:16 竖屏），在控制台录制或回放自动玩</p>
+  </div>
+  <div class="cats" id="cats"></div>
+  <div class="grid" id="grid"></div>
+
+  <div class="modal-mask" id="mask">
+    <div class="modal">
+      <h3 id="m-title">添加游戏</h3>
+      <label>游戏名称</label><input id="m-name" placeholder="例如：我要动个脑">
+      <label>H5 链接</label><input id="m-url" placeholder="http://game.migoup.com/h5/xxx">
+      <label>描述（卡片上的说明）</label><input id="m-desc" placeholder="脑洞解谜类 H5 小游戏">
+      <label>分类（左下角标签）</label><input id="m-cat" placeholder="益智类">
+      <div class="actions">
+        <button class="cancel" id="m-cancel">取消</button>
+        <button class="ok" id="m-ok">添加</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+  let games = [];
+  let curCat = '全部';
+  const CAT_COLORS = { '益智类':'#22b8ff', '休闲类':'#ff5ca8', '棋牌类':'#22d39a', '反应类':'#eab308', '益智':'#22b8ff', '动作':'#ff8a3d', '消除':'#22d39a' };
+  const palette = ['#7c5cff','#22b8ff','#22d39a','#ff8a3d','#ff5ca8','#eab308'];
+  const grid = document.getElementById('grid');
+
+  // 生成分类导航栏（全部 + 已有分类 + 我的游戏）
+  function buildCats() {
+    const box = document.getElementById('cats');
+    box.innerHTML = '';
+    const cats = ['全部'];
+    games.forEach(g => { if (g.category && !cats.includes(g.category)) cats.push(g.category); });
+    cats.push('我的游戏');
+    cats.forEach(c => {
+      const b = document.createElement('button');
+      b.className = 'cat-btn' + (curCat === c ? ' active' : '');
+      const color = CAT_COLORS[c] || '#8a90b8';
+      b.innerHTML = '<span class="cat-dot" style="background:' + color + '"></span>' + c;
+      b.onclick = () => {
+        curCat = c;
+        box.querySelectorAll('.cat-btn').forEach(x => x.classList.remove('active'));
+        b.classList.add('active');
+        render(games);
+      };
+      box.appendChild(b);
+    });
+  }
+
+  function render(list) {
+    const kw = document.getElementById('search').value.trim();
+    let data = list.filter(g => !kw || g.name.includes(kw));
+    if (curCat === '我的游戏') data = data.filter(g => g.mine);
+    else if (curCat !== '全部') data = data.filter(g => g.category === curCat);
+    grid.innerHTML = '';
+    if (!data.length) { grid.innerHTML = '<div class="empty">暂无游戏，点右上角「添加游戏」</div>'; return; }
+    data.forEach((g, i) => {
+      const color = g.color || palette[i % palette.length];
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.style.background = 'linear-gradient(135deg,' + color + ',' + shade(color) + ')';
+      card.innerHTML =
+        '<div><span class="tag">可游玩</span><h3>' + g.name + '</h3><p>' + (g.desc||'') + '</p></div>' +
+        '<div class="row"><span class="cat">' + (g.category||'') + '</span><span class="ops"><button class="edit">编辑</button><button class="del">删除</button><button class="start">开始 ▶</button></span></div>';
+      card.querySelector('.start').onclick = (e) => { e.stopPropagation(); window.api.startGame(g.id); };
+      card.querySelector('.edit').onclick = (e) => { e.stopPropagation(); openEdit(g); };
+      card.querySelector('.del').onclick = (e) => { e.stopPropagation(); delGame(g); };
+      card.onclick = () => window.api.startGame(g.id);
+      grid.appendChild(card);
+    });
+  }
+  function shade(hex) { // 简单压暗
+    const n = parseInt(hex.slice(1), 16);
+    let r = (n>>16)&255, gg = (n>>8)&255, b = n&255;
+    r = Math.round(r*0.7); gg = Math.round(gg*0.7); b = Math.round(b*0.7);
+    return 'rgb('+r+','+gg+','+b+')';
+  }
+
+  document.getElementById('search').oninput = () => render(games);
+  window.api.listGames().then(list => { games = list; buildCats(); render(games); });
+
+  const mask = document.getElementById('mask');
+  let editingId = null;
+  function openModal(title, g) {
+    document.getElementById('m-title').textContent = title;
+    document.getElementById('m-name').value = g ? g.name : '';
+    document.getElementById('m-url').value = g ? (g.url||'') : '';
+    document.getElementById('m-desc').value = g ? (g.desc||'') : '';
+    document.getElementById('m-cat').value = g ? (g.category||'') : '';
+    editingId = g ? g.id : null;
+    mask.style.display = 'flex';
+  }
+  function closeModal() { mask.style.display = 'none'; editingId = null; }
+  document.getElementById('addBtn').onclick = () => openModal('添加游戏', null);
+  function openEdit(g) { openModal('编辑游戏', g); }
+  async function delGame(g) {
+    if (!confirm('删除「' + g.name + '」？')) return;
+    games = await window.api.deleteGame(g.id);
+    render(games);
+  }
+  document.getElementById('m-cancel').onclick = closeModal;
+  document.getElementById('m-ok').onclick = async () => {
+    const name = document.getElementById('m-name').value.trim();
+    const url = document.getElementById('m-url').value.trim();
+    const desc = document.getElementById('m-desc').value.trim();
+    const category = document.getElementById('m-cat').value.trim();
+    if (!name || !url) { alert('请填写名称和链接'); return; }
+    const patch = { name, url, category, desc: desc || 'H5 小游戏' };
+    games = editingId ? await window.api.updateGame(editingId, patch) : await window.api.addGame(patch);
+    buildCats(); render(games);
+    closeModal();
+  };
+</script>
+</body>
+</html>
