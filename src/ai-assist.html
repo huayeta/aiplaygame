@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>AI 助播</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  body { background: radial-gradient(1200px 600px at 70% -10%, #1d2148 0%, #0f1020 55%); color: #e8e9f5; min-height: 100vh; padding: 24px 28px; }
+  .cols { display: flex; gap: 20px; }
+  .col { flex: 1; background: #15162a; border: 1px solid #2a2d52; border-radius: 16px; padding: 22px; }
+  h2 { font-size: 18px; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
+  .sub { font-size: 12px; color: #9aa0c8; margin-bottom: 18px; }
+  .field { margin-bottom: 14px; }
+  .label { font-size: 12px; color: #9aa0c8; margin-bottom: 6px; display: block; }
+  select, input[type=text], textarea { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #2a2d52; background: #0f1020; color: #e8e9f5; font-size: 13px; outline: none; }
+  textarea { resize: vertical; min-height: 110px; }
+  .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .range { flex: 1; }
+  .range span { font-size: 12px; color: #cfd2ee; min-width: 42px; }
+  input[type=range] { flex: 1; accent-color: #8b5cff; }
+  input[type=range].sm { max-width: 90px; }
+  .btns { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+  button { padding: 10px 16px; border-radius: 10px; border: none; cursor: pointer; font-weight: 600; font-size: 13px; }
+  .primary { background: linear-gradient(135deg,#8b5cff,#ff5ca8); color: #fff; }
+  .green { background: linear-gradient(135deg,#22d39a,#16a34a); color: #fff; }
+  .ghost { background: #2a2d52; color: #cfd2ee; }
+  .danger { background: linear-gradient(135deg,#ef4444,#b91c1c); color: #fff; }
+  .state { font-size: 12px; color: #22d39a; margin-top: 10px; min-height: 16px; }
+  .state.err { color: #ef4444; }
+  ul { list-style: none; max-height: 180px; overflow-y: auto; margin: 8px 0; }
+  ul li { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 8px; background: #0f1020; margin-bottom: 6px; font-size: 12px; }
+  ul li input { accent-color: #ff5ca8; }
+  ul li span.name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .empty-tip { color: #5a5f85; font-size: 12px; text-align: center; padding: 18px 0; }
+  .switch { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
+  .switch input { width: 16px; height: 16px; accent-color: #22d39a; }
+  .pth-row { display: flex; gap: 8px; align-items: center; }
+  .pth-row input { flex: 1; }
+  .chip { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 11px; background: rgba(139,92,255,.2); color: #c9b8ff; margin-left: 8px; }
+</style>
+</head>
+<body>
+  <div class="cols">
+    <!-- 左：文本朗读 & 定时播报 -->
+    <div class="col">
+      <h2>🎙 文本朗读 & 定时播报 <span class="chip">edge-tts 免费云端</span></h2>
+      <p class="sub">选声音 → 输入文案朗读；可定时自动随机播报</p>
+
+      <div class="field">
+        <span class="label">声音（音色）</span>
+        <select id="voiceSel"></select>
+      </div>
+
+      <div class="field pth-row">
+        <span class="label" style="flex:none;margin:0;">.pth 模型</span>
+        <input id="modelPath" readonly placeholder="（预留）选择本地 .pth 声音模型，环境装好后可用">
+        <button class="ghost" id="pickModel" style="white-space:nowrap;">浏览</button>
+      </div>
+
+      <div class="row field">
+        <div class="range"><span>语速</span><input type="range" id="speed" min="0.5" max="2" step="0.1" value="1"></div>
+        <div class="range"><span>音量</span><input type="range" id="ttsVol" min="0" max="1" step="0.05" value="1"></div>
+      </div>
+
+      <div class="field">
+        <span class="label">输入要朗读的文案</span>
+        <textarea id="ttsText" placeholder="欢迎来到我的小游戏直播间，喜欢的朋友点点关注，我们开始今天的休闲小游戏之旅～"></textarea>
+      </div>
+
+      <div class="btns">
+        <button class="primary" id="ttsBtn">▶ 朗读</button>
+        <button class="ghost" id="stopTts">■ 停止</button>
+      </div>
+      <div class="state" id="ttsState"></div>
+
+      <hr style="border:none;border-top:1px solid #2a2d52;margin:18px 0 14px;">
+
+      <div class="field">
+        <label class="switch"><input type="checkbox" id="timerOn"> 自动定时播报</label>
+      </div>
+      <div class="row field">
+        <span class="label" style="flex:none;margin:0;">模式</span>
+        <select id="timerMode" style="max-width:140px;">
+          <option value="rand">随机秒数</option>
+          <option value="fix">限时每X分钟</option>
+        </select>
+        <input type="text" id="randA" value="5" style="width:46px;" title="最小秒"> ~
+        <input type="text" id="randB" value="15" style="width:46px;" title="最大秒">
+        <span class="label" style="flex:none;margin:0;">秒</span>
+        <input type="text" id="fixM" value="2" style="width:46px;" title="分钟">
+        <span class="label" style="flex:none;margin:0;">分钟</span>
+      </div>
+
+      <div class="field">
+        <span class="label">播报内容列表（随机选一条，每行一条）</span>
+        <textarea id="lines" placeholder="欢迎家人们来到直播间，喜欢点点关注
+好玩的小游戏每天都有，点点赞增加热度
+无聊摸鱼的家人快来放松一下
+感谢每一位停留陪伴的家人"></textarea>
+      </div>
+
+      <div class="btns">
+        <button class="green" id="startTimer">▶ 开始播报</button>
+        <button class="danger" id="stopTimer">■ 停止播报</button>
+        <button class="ghost" id="preview">试听语音</button>
+      </div>
+      <div class="state" id="timerState">待启动</div>
+    </div>
+
+    <!-- 右：背景音乐 -->
+    <div class="col">
+      <h2>🎵 背景音乐</h2>
+      <p class="sub">选择本地音频，循环播放营造氛围</p>
+
+      <div class="field">
+        <button class="ghost" id="pickMusic" style="width:100%;">📂 选择音乐文件（mp3 / wav / ogg）</button>
+      </div>
+      <div class="field">
+        <span class="label">播放列表</span>
+        <ul id="playlist"></ul>
+        <button class="ghost" id="removeSel" style="width:100%;">移除选中</button>
+      </div>
+
+      <div class="row field">
+        <div class="range"><span>音乐音量</span><input type="range" id="bgmVol" min="0" max="1" step="0.05" value="0.3"></div>
+      </div>
+      <div class="row field">
+        <span class="label" style="flex:none;margin:0;">播放模式</span>
+        <select id="loopMode" style="max-width:130px;">
+          <option value="loop">循环播放</option>
+          <option value="once">单曲</option>
+        </select>
+        <span class="label" style="flex:none;margin:0;">播报时</span>
+        <select id="duck" style="max-width:130px;">
+          <option value="none">不处理</option>
+          <option value="low">降低音乐</option>
+        </select>
+      </div>
+
+      <div class="btns">
+        <button class="green" id="play">▶ 播放</button>
+        <button class="ghost" id="pause">⏸ 暂停</button>
+        <button class="danger" id="stop">■ 停止</button>
+      </div>
+      <div class="state" id="bgmState">未播放</div>
+    </div>
+  </div>
+
+<script>
+  const VOICES = [
+    ['zh-CN-XiaoxiaoNeural', '晓晓（女）'], ['zh-CN-XiaoyiNeural', '晓伊（女）'],
+    ['zh-CN-YunxiNeural', '云希（男）'], ['zh-CN-YunjianNeural', '云健（男）'],
+    ['zh-CN-YunyangNeural', '云扬（男·新闻）'], ['zh-CN-YunxiaNeural', '云夏（少年）'],
+    ['zh-CN-liaoning-XiaobeiNeural', '晓北（辽宁·女）'], ['zh-CN-shaanxi-XiaoniNeural', '晓妮（陕西·女）']
+  ];
+  const voiceSel = document.getElementById('voiceSel');
+  VOICES.forEach(v => { const o = document.createElement('option'); o.value = v[0]; o.textContent = v[1]; voiceSel.appendChild(o); });
+
+  const voiceAudio = new Audio();
+  const bgmAudio = new Audio();
+  const playList = [];
+  let timer = null;
+
+  const state = (id, msg, err) => { const el = document.getElementById(id); el.textContent = msg; el.className = 'state' + (err ? ' err' : ''); };
+
+  // ---- 文本朗读 ----
+  async function speak(text) {
+    if (!text) { state('ttsState', '请先输入文案', true); return; }
+    state('ttsState', '合成中…');
+    const r = await window.api.tts({ text, voice: voiceSel.value, speed: +document.getElementById('speed').value });
+    if (!r.ok) { state('ttsState', '合成失败：' + r.err, true); return; }
+    voiceAudio.volume = +document.getElementById('ttsVol').value;
+    voiceAudio.src = r.url;
+    voiceAudio.play();
+    state('ttsState', '播放中…');
+  }
+  document.getElementById('ttsBtn').onclick = () => speak(document.getElementById('ttsText').value);
+  document.getElementById('stopTts').onclick = () => { voiceAudio.pause(); voiceAudio.currentTime = 0; state('ttsState', '已停止'); };
+
+  // ---- 定时播报 ----
+  function getLines() { return document.getElementById('lines').value.split('\n').map(s => s.trim()).filter(Boolean); }
+  function pickLine() { const ls = getLines(); return ls.length ? ls[Math.floor(Math.random() * ls.length)] : null; }
+  function intervalSec() {
+    if (document.getElementById('timerMode').value === 'fix') {
+      const m = Math.max(0.1, parseFloat(document.getElementById('fixM').value) || 2);
+      return m * 60;
+    }
+    const a = Math.max(1, parseInt(document.getElementById('randA').value) || 5);
+    const b = Math.max(a, parseInt(document.getElementById('randB').value) || 15);
+    return (Math.random() * (b - a) + a) * 1000;
+  }
+  async function playOne() {
+    const line = pickLine();
+    if (!line) { state('timerState', '播报列表为空，请先填写', true); return; }
+    const duck = document.getElementById('duck').value === 'low';
+    if (duck && bgmAudio.src) bgmAudio.volume = +document.getElementById('bgmVol').value * 0.15;
+    const r = await window.api.tts({ text: line, voice: voiceSel.value, speed: +document.getElementById('speed').value });
+    if (!r.ok) return;
+    voiceAudio.volume = +document.getElementById('ttsVol').value;
+    voiceAudio.src = r.url;
+    await voiceAudio.play();
+    voiceAudio.onended = () => { if (duck && bgmAudio.src) bgmAudio.volume = +document.getElementById('bgmVol').value; };
+    state('timerState', '播报：' + line);
+  }
+  function schedule() {
+    clearTimeout(timer);
+    const loop = async () => { await playOne(); timer = setTimeout(loop, intervalSec()); };
+    timer = setTimeout(loop, intervalSec());
+  }
+  document.getElementById('startTimer').onclick = () => {
+    if (!document.getElementById('timerOn').checked) document.getElementById('timerOn').checked = true;
+    schedule();
+    state('timerState', '定时播报已启动');
+  };
+  document.getElementById('stopTimer').onclick = () => { clearTimeout(timer); timer = null; state('timerState', '已停止'); };
+  document.getElementById('timerOn').onchange = (e) => { if (e.target.checked) schedule(); else { clearTimeout(timer); timer = null; state('timerState', '已停止'); } };
+  document.getElementById('preview').onclick = () => { const line = pickLine(); if (line) speak(line); else state('timerState', '播报列表为空', true); };
+
+  // ---- .pth 模型（预留）----
+  document.getElementById('pickModel').onclick = async () => {
+    const p = await window.api.pickModelPth();
+    if (p) { document.getElementById('modelPath').value = p; state('ttsState', '已选择模型（本地引擎预留，装环境后生效）'); }
+  };
+
+  // ---- 背景音乐 ----
+  function renderList() {
+    const ul = document.getElementById('playlist');
+    ul.innerHTML = '';
+    if (!playList.length) { ul.innerHTML = '<div class="empty-tip">暂无音乐，点上方「选择」添加</div>'; return; }
+    playList.forEach((p, i) => {
+      const li = document.createElement('li');
+      li.innerHTML = '<input type="checkbox" value="' + i + '"><span class="name">' + p.split('/').pop() + '</span>';
+      li.onclick = () => { bgmAudio.src = 'file://' + encodeURI(p); bgmAudio.volume = +document.getElementById('bgmVol').value; if (document.getElementById('loopMode').value === 'loop') bgmAudio.loop = true; bgmAudio.play(); state('bgmState', '播放中：' + p.split('/').pop()); };
+      ul.appendChild(li);
+    });
+  }
+  document.getElementById('pickMusic').onclick = async () => {
+    const p = await window.api.pickAudio();
+    if (p) { playList.push(p); renderList(); state('bgmState', '已添加：' + p.split('/').pop()); }
+  };
+  document.getElementById('removeSel').onclick = () => {
+    const checked = [...document.querySelectorAll('#playlist input:checked')].map(i => +i.value);
+    checked.sort((a, b) => b - a).forEach(i => playList.splice(i, 1));
+    renderList();
+  };
+  document.getElementById('play').onclick = () => { if (bgmAudio.src) { bgmAudio.volume = +document.getElementById('bgmVol').value; bgmAudio.play(); state('bgmState', '播放中'); } };
+  document.getElementById('pause').onclick = () => { bgmAudio.pause(); state('bgmState', '已暂停'); };
+  document.getElementById('stop').onclick = () => { bgmAudio.pause(); bgmAudio.currentTime = 0; state('bgmState', '已停止'); };
+  document.getElementById('bgmVol').oninput = (e) => { bgmAudio.volume = +e.target.value; };
+  document.getElementById('loopMode').onchange = (e) => { bgmAudio.loop = e.target.value === 'loop'; };
+
+  renderList();
+</script>
+</body>
+</html>

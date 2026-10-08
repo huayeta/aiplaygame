@@ -1,6 +1,9 @@
 const { app, BrowserWindow, ipcMain, nativeImage, Menu, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
+const { pathToFileURL } = require('url');
+const { MsEdgeTTS, OUTPUT_FORMAT } = require('msedge-tts');
 
 const ROOT = app.getAppPath();
 const DATA_DIR = path.join(ROOT, 'src');
@@ -14,6 +17,7 @@ const GAME_H = 736; // 9:16
 let libraryWin = null;
 let gameWin = null;
 let panelWin = null;
+let aiassistWin = null;
 
 const auto = {
   gameId: null,
@@ -63,6 +67,72 @@ function createLibrary() {
   libraryWin.loadFile(path.join(DATA_DIR, 'library.html'));
   libraryWin.on('closed', () => { libraryWin = null; });
 }
+
+// ---------- AI 助播窗口 ----------
+function createAI() {
+  if (aiassistWin && !aiassistWin.isDestroyed()) { aiassistWin.focus(); return; }
+  aiassistWin = new BrowserWindow({
+    width: 900,
+    height: 700,
+    minWidth: 840,
+    minHeight: 620,
+    backgroundColor: '#0f1020',
+    title: 'AI 助播',
+    webPreferences: {
+      preload: path.join(DATA_DIR, 'preload-aiassist.js'),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  aiassistWin.setMenuBarVisibility(false);
+  aiassistWin.loadFile(path.join(DATA_DIR, 'ai-assist.html'));
+  aiassistWin.on('closed', () => { aiassistWin = null; });
+}
+
+// ---------- AI 助播：文本朗读 / 定时播报 / 背景音乐 ----------
+const VOICE_TMP = path.join(os.tmpdir(), 'aiassist_voice');
+try { fs.mkdirSync(VOICE_TMP, { recursive: true }); } catch (e) {}
+
+ipcMain.handle('ai:open', () => createAI());
+
+// 用免费 edge-tts 云端合成语音，返回本地 file:// 音频 URL
+ipcMain.handle('ai:tts', async (e, opts) => {
+  const text = String(opts && opts.text || '').trim();
+  if (!text) return { ok: false, err: '文案为空' };
+  const voice = (opts && opts.voice) || 'zh-CN-XiaoxiaoNeural';
+  const speed = Number(opts && opts.speed) || 1; // 0.5 ~ 2.0
+  const ratePct = Math.max(-50, Math.min(100, Math.round((speed - 1) * 100)));
+  const rateStr = (ratePct >= 0 ? '+' : '') + ratePct + '%';
+  const dir = path.join(VOICE_TMP, String(Date.now()));
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const tts = new MsEdgeTTS();
+    await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
+    const r = await tts.toFile(dir, text, { rate: rateStr, volume: '+0%', pitch: '+0Hz' });
+    return { ok: true, url: pathToFileURL(r.audioFilePath).href };
+  } catch (err) {
+    return { ok: false, err: String((err && err.message) || err) };
+  }
+});
+
+ipcMain.handle('ai:pickAudio', async () => {
+  const res = await dialog.showOpenDialog(aiassistWin || libraryWin, {
+    title: '选择背景音乐', properties: ['openFile'],
+    filters: [{ name: '音频', extensions: ['mp3', 'wav', 'ogg', 'm4a', 'flac'] }]
+  });
+  if (res.canceled || !res.filePaths.length) return null;
+  return res.filePaths[0];
+});
+
+// 预留：选择本地 .pth 声音模型（GPT-SoVITS，环境装好后使用）
+ipcMain.handle('ai:pickModelPth', async () => {
+  const res = await dialog.showOpenDialog(aiassistWin || libraryWin, {
+    title: '选择声音模型', properties: ['openFile'],
+    filters: [{ name: '声音模型', extensions: ['pth', 'safetensors', 'ckpt'] }]
+  });
+  if (res.canceled || !res.filePaths.length) return null;
+  return res.filePaths[0];
+});
 
 // ---------- 游戏窗口 + 控制面板 ----------
 async function startGame(game) {
@@ -598,6 +668,118 @@ ipcMain.on('tpl:capture', async () => {
   const file = path.join(TPL_DIR, auto.gameId + '-' + Date.now() + '.png');
   fs.writeFileSync(file, img.toPNG());
   setStatus('已截图模板：' + path.basename(file));
+});
+
+// ---------- 弹幕自动回复（非官方：浏览器自动化抓直播间 DOM） ----------
+let danmakuWin = null;
+let dmTimer = null;
+const DM_INTERVAL = 600;
+
+// 注入到直播间页：MutationObserver 把新弹幕收集进 window.__dmNew（扩大选择器 + 过滤进场提示）
+const dmInject = `(function(){
+  if (window.__dmObsInjected) return 'already';
+  window.__dmNew = window.__dmNew || [];
+  const seen = window.__dmSeen = window.__dmSeen || new Set();
+  function clean(t){ return (t||'').replace(/\\s+/g,' ').trim(); }
+  function pushLine(el){
+    if (!el || el.nodeType !== 1) return;
+    const txt = clean(el.innerText);
+    if (!txt || txt.length > 120 || seen.has(txt)) return;
+    // 只过滤明显的系统公告，保留进场提示与真实发言
+    if (/^(欢迎|感谢|主播|直播|本场)/.test(txt)) return;
+    seen.add(txt);
+    window.__dmNew.push(txt);
+  }
+  function scanNode(node){
+    if (!node || node.nodeType !== 1) return;
+    const cls = String(node.className||'');
+    if (/chatroom|message|danmaku|comment/i.test(cls)) pushLine(node);
+    if (node.querySelectorAll){
+      const list = node.querySelectorAll('[class*="chatroom"],[class*="message"],[class*="danmaku"],[class*="comment"]');
+      for (let i=0;i<list.length;i++) pushLine(list[i]);
+    }
+  }
+  const obs = new MutationObserver(muts => {
+    for (const m of muts) {
+      for (const n of m.addedNodes) scanNode(n);
+      if (m.type === 'characterData' && m.target && m.target.parentElement) scanNode(m.target.parentElement);
+    }
+  });
+  try { obs.observe(document.body, {childList:true, subtree:true, characterData:true}); } catch(e){}
+  window.__dmObsInjected = true;
+  window.__dmScan = setInterval(() => {
+    try { document.querySelectorAll('[class*="chatroom"],[class*="danmaku"],[class*="comment"]').forEach(pushLine); } catch(e){}
+  }, 1500);
+  return 'started';
+})()`;
+const dmPull = `(()=>{ var a = (window.__dmNew||[]).slice(); window.__dmNew = []; return a; })()`;
+
+let lastDmStatus = ''; // 去重：连续相同状态只发一次（避免 did-start-loading 重复刷屏）
+function sendDmStatus(msg) { if (msg === lastDmStatus) return; lastDmStatus = msg; if (libraryWin && !libraryWin.isDestroyed()) libraryWin.webContents.send('dm:status', msg); }
+
+function connectDanmaku(url) {
+  disconnectDanmaku();
+  if (!/^https?:\/\//.test(url)) return;
+  sendDmStatus('正在打开直播间页面…');
+  danmakuWin = new BrowserWindow({
+    width: 1080, height: 760, show: false,
+    backgroundColor: '#0f1020', title: '弹幕源（直播间）',
+    webPreferences: { contextIsolation: true, nodeIntegration: false, partition: 'persist:douyin' }
+  });
+  danmakuWin.setMenuBarVisibility(false);
+  danmakuWin.webContents.on('did-start-loading', () => sendDmStatus('正在加载直播间页面…'));
+  danmakuWin.webContents.on('did-finish-load', async () => {
+    sendDmStatus('页面加载完成，注入弹幕监听…');
+    const r = await danmakuWin.webContents.executeJavaScript(dmInject, true).catch(() => 'error');
+    sendDmStatus('弹幕监听已注入（' + r + '），开始实时抓取…');
+    startDanmaku();
+  });
+  danmakuWin.loadURL(url);
+  danmakuWin.on('closed', () => { danmakuWin = null; stopDanmaku(); });
+}
+function startDanmaku() {
+  stopDanmaku();
+  dmTimer = setInterval(async () => {
+    if (!danmakuWin || danmakuWin.isDestroyed()) return;
+    try {
+      const arr = await danmakuWin.webContents.executeJavaScript(dmPull, true);
+      if (arr && arr.length && libraryWin && !libraryWin.isDestroyed()) {
+        arr.forEach(line => libraryWin.webContents.send('dm:message', line));
+      }
+    } catch (e) {}
+  }, DM_INTERVAL);
+}
+function stopDanmaku() { if (dmTimer) { clearInterval(dmTimer); dmTimer = null; } }
+function disconnectDanmaku() { stopDanmaku(); if (danmakuWin && !danmakuWin.isDestroyed()) danmakuWin.destroy(); danmakuWin = null; }
+
+ipcMain.handle('dm:connect', (e, url) => { connectDanmaku(String(url || '').trim()); return true; });
+ipcMain.handle('dm:showLogin', () => { if (danmakuWin && !danmakuWin.isDestroyed()) { danmakuWin.show(); danmakuWin.focus(); } return true; });
+ipcMain.handle('dm:hide', () => { if (danmakuWin && !danmakuWin.isDestroyed()) danmakuWin.hide(); return true; });
+ipcMain.handle('dm:disconnect', () => { disconnectDanmaku(); return true; });
+ipcMain.handle('ai:chat', async (_e, cfg) => {
+  try {
+    const apiKey = String(cfg && cfg.apiKey || '').trim();
+    const baseUrl = String(cfg && cfg.baseUrl || 'https://api.deepseek.com').trim();
+    const model = String(cfg && cfg.model || 'deepseek-chat').trim();
+    if (!apiKey) return { ok: false, error: '请先填写 API Key' };
+    const url = baseUrl.replace(/\/+$/, '') + '/chat/completions';
+    const isGlm = /^glm/i.test(model);
+    const payload = { model, messages: cfg.messages || [], max_tokens: 300, temperature: 0.8 };
+    if (isGlm) payload.thinking = { type: 'disabled' }; // 智谱混合思考模型：关闭思考，让 content 直接返回正式回答
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
+      body: JSON.stringify(payload)
+    });
+    const j = await r.json().catch(() => null);
+    if (!r.ok) return { ok: false, error: (j && j.error && j.error.message) || ('HTTP ' + r.status) };
+    const msg = (j && j.choices && j.choices[0] && j.choices[0].message) || {};
+    let text = msg.content;
+    if (text == null || text === '') text = msg.reasoning_content;
+    if (Array.isArray(text)) text = text.map(p => (p && (p.text || p.content)) || '').join('');
+    text = String(text || '').trim();
+    return { ok: true, text };
+  } catch (err) { return { ok: false, error: String((err && err.message) || err) }; }
 });
 
 // ---------- 启动 ----------

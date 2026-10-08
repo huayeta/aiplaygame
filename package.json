@@ -8,5 +8,8 @@
   },
   "devDependencies": {
     "electron": "latest"
+  },
+  "dependencies": {
+    "msedge-tts": "^2.0.9"
   }
 }
