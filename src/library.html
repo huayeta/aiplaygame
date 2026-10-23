@@ -441,6 +441,12 @@
         <div class="cfg-row"><span class="cfg-label">Base URL</span><input id="siliconBase" type="text" value="https://api.siliconflow.cn/v1" style="flex:1;min-width:0;"></div>
         <div class="cfg-row"><span class="cfg-label">Model</span><input id="siliconModel" type="text" value="deepseek-ai/DeepSeek-V3.1" style="flex:1;min-width:0;"></div>
       </div>
+      <div class="ai-provider-card" data-p="sensenova">
+        <label class="ap-head"><input type="radio" name="aiProvider" value="sensenova"> 商汤 SenseNova（日日新）<span class="ap-code">sensenova</span></label>
+        <div class="cfg-row"><span class="cfg-label">API Key</span><input id="sensenovaKey" type="password" placeholder="platform.sensenova.cn 控制台获取" style="flex:1;min-width:0;"></div>
+        <div class="cfg-row"><span class="cfg-label">Base URL</span><input id="sensenovaBase" type="text" value="https://token.sensenova.cn/v1" style="flex:1;min-width:0;"></div>
+        <div class="cfg-row"><span class="cfg-label">Model</span><input id="sensenovaModel" type="text" value="sensenova-6.7-flash-lite" style="flex:1;min-width:0;"></div>
+      </div>
       <div class="field"><span class="label">主播描述 / 产品话术</span>
         <textarea id="aiPrompt" rows="3">我是一个小游戏主播，我现在玩的游戏是我要动个脑，如果有用户问玩的什么游戏，请替我回答，只回答用户的提问，其他弹幕不用回答，如果用户问什么游戏，用不同的风格去回复用户，字数在15个字左右</textarea></div>
       <div class="field"><span class="label">过滤关键词（分号分隔，弹幕含这些词不触发AI答疑）</span>
@@ -1451,6 +1457,9 @@
       siliconKey: document.getElementById('siliconKey').value,
       siliconBase: document.getElementById('siliconBase').value,
       siliconModel: document.getElementById('siliconModel').value,
+      sensenovaKey: document.getElementById('sensenovaKey').value,
+      sensenovaBase: document.getElementById('sensenovaBase').value,
+      sensenovaModel: document.getElementById('sensenovaModel').value,
       visionModel: document.getElementById('aiVisionModel').value,
       aiPrompt: document.getElementById('aiPrompt').value,
       aiFilter: document.getElementById('aiFilter').value,
@@ -1466,7 +1475,7 @@
     syncAICfg();
   }
   // 所有配置控件变更即自动保存到 JSON 文件
-  ['dskKey','dskBase','dskModel','zhipuKey','zhipuBase','zhipuModel','siliconKey','siliconBase','siliconModel','aiVisionModel','aiPrompt','aiFilter','aiCool','aiRetry','aiFallOrder'].forEach(id => {
+  ['dskKey','dskBase','dskModel','zhipuKey','zhipuBase','zhipuModel','siliconKey','siliconBase','siliconModel','sensenovaKey','sensenovaBase','sensenovaModel','aiVisionModel','aiPrompt','aiFilter','aiCool','aiRetry','aiFallOrder'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('input', saveAICfg);
   });
@@ -1491,7 +1500,7 @@
     aiBusy = true;
     try {
       const sys = document.getElementById('aiPrompt').value.trim() || '你是直播间AI答疑助手，请口语化、简短地回答问题';
-      const providers = ['dsk', 'zhipu', 'silicon'];
+      const providers = ['dsk', 'zhipu', 'silicon', 'sensenova'];
       const pv0 = (document.querySelector('input[name="aiProvider"]:checked') || {}).value || 'dsk';
       const retry = Math.max(0, +document.getElementById('aiRetry').value || 0);
       const fallback = document.getElementById('aiFallback').checked;
@@ -1752,7 +1761,7 @@
     try {
       const cfg = await window.api.cfgLoad();
       const d = (cfg && cfg.aiChat) || {};
-      ['dskKey','dskBase','dskModel','zhipuKey','zhipuBase','zhipuModel','siliconKey','siliconBase','siliconModel'].forEach(k => { if (d[k] !== undefined) document.getElementById(k).value = d[k]; });
+      ['dskKey','dskBase','dskModel','zhipuKey','zhipuBase','zhipuModel','siliconKey','siliconBase','siliconModel','sensenovaKey','sensenovaBase','sensenovaModel'].forEach(k => { if (d[k] !== undefined) document.getElementById(k).value = d[k]; });
       if (d.provider) { const r = document.querySelector('input[name="aiProvider"][value="' + d.provider + '"]'); if (r) r.checked = true; }
       if (d.aiPrompt !== undefined) document.getElementById('aiPrompt').value = d.aiPrompt;
       if (d.aiFilter !== undefined) document.getElementById('aiFilter').value = d.aiFilter;

@@ -1047,6 +1047,7 @@ const DEFAULT_CONFIG = {
     dskKey: '', dskBase: 'https://api.deepseek.com', dskModel: 'deepseek-v4-flash',
     zhipuKey: '', zhipuBase: 'https://open.bigmodel.cn/api/paas/v4', zhipuModel: 'glm-4.7-flash',
     siliconKey: '', siliconBase: '', siliconModel: '',
+    sensenovaKey: '', sensenovaBase: 'https://token.sensenova.cn/v1', sensenovaModel: 'sensenova-6.7-flash-lite',
     visionModel: 'glm-4.6v-flash',
     aiPrompt: '我是一个小游戏主播，我现在玩的游戏是我要动个脑，如果有用户问玩的什么游戏，请替我回答，只回答用户的提问，其他弹幕不用回答，如果用户问什么游戏，用不同的风格去回复用户，字数在15个字左右',
     aiFilter: '', aiCool: '', aiRetry: '', aiFallback: true, aiFallOrder: '',
