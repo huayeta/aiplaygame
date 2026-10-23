@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>语音队列</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Microsoft YaHei', system-ui, sans-serif; background: #171830; color: #e7e9f7; overflow: hidden; }
+  .wrap { padding: 14px 16px; }
+  .head { font-size: 14px; font-weight: 600; color: #ff5ca8; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; }
+  .clearBtn { background: #2a2d52; border: 1px solid #6a3a6a; color: #ffb0d0; border-radius: 8px; padding: 5px 12px; font-size: 12px; cursor: pointer; font-weight: 600; }
+  .clearBtn:hover { background: #6a3a6a; color: #fff; }
+  .pauseBtn { background: #2a2d52; border: 1px solid #8b5cff; color: #c3c7e8; border-radius: 8px; padding: 5px 12px; font-size: 12px; cursor: pointer; font-weight: 600; }
+  .pauseBtn:hover { background: #8b5cff; color: #fff; }
+  .headBtns { display: flex; gap: 8px; }
+  .now { margin-bottom: 12px; }
+  .now .lbl { font-size: 11px; color: #9aa0c8; margin-bottom: 4px; }
+  .queue { margin-top: 6px; }
+  .qitem { display: flex; align-items: flex-start; gap: 8px; padding: 7px 10px; border-radius: 8px; background: #0f1020; margin-bottom: 6px; font-size: 12px; }
+  .qitem .badge { flex: none; color: #fff; font-weight: 600; font-size: 11px; border-radius: 6px; padding: 2px 7px; white-space: nowrap; }
+  .qitem .txt { flex: 1; color: #c3c7e8; word-break: break-all; min-width: 0; }
+  .qitem .tagc { flex: none; color: #6f74a0; font-size: 11px; }
+  .empty { color: #5a5f85; font-size: 12px; padding: 8px 0; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="head">🔊 语音任务队列 <span class="headBtns"><button class="pauseBtn" id="vqPause">⏸ 暂停</button><button class="clearBtn" id="vqClear">🗑 清空语音</button></span></div>
+    <div class="lbl" style="font-size:11px;color:#9aa0c8;margin-bottom:4px;">正在播报</div>
+    <div class="queue" id="vqNowBox"><div class="qitem" id="vqNow"><span class="txt" style="color:#6f74a0;">（空闲）</span></div></div>
+    <div class="lbl" style="font-size:11px;color:#9aa0c8;margin:8px 0 4px;">等待播报（<span id="vqCount">0</span> 条）</div>
+    <div class="queue" id="vqQueue"><div class="empty">无等待任务</div></div>
+  </div>
+  <script>
+    // 类型 → 彩色徽章（手动/播报/报时/事件），与原有看板一致
+    function badge(t){
+      const map = { READ: ['#8b5cff','手动'], CONTENT: ['#22d39a','播报'], TIME: ['#f0a020','报时'], EVENT: ['#ff5ca8','事件'] };
+      const c = map[t.type] || ['#5a5f85','?'];
+      return '<span class="badge" style="background:' + c[0] + ';">' + c[1] + '</span>';
+    }
+    // tag → 中文映射
+    function tagCN(tag){
+      if (!tag) return '朗读';
+      if (/^dm:welcome/i.test(tag)) return '欢迎';
+      if (/^dm:gift/i.test(tag)) return '礼物';
+      if (/^dm:like/i.test(tag)) return '点赞';
+      if (/^dm:/i.test(tag)) return '弹幕';
+      if (tag === 'dm') return '弹幕';
+      if (tag === 'ai') return '答疑';
+      if (tag === 'time') return '报时';
+      if (tag === 'read') return '朗读';
+      if (tag === 'content') return '定时播报';
+      return tag;
+    }
+    // 生成一条行：徽章 + 文本 + 中文tag，正在播报与等待播报样式统一
+    function row(t){
+      return '<div class="qitem">' + badge(t) + '<span class="txt">' + (t.text || '（动态内容）') + '</span><span class="tagc">' + tagCN(t.tag) + '</span></div>';
+    }
+    if (window.vqAPI) {
+      // 暂停/继续：点击切换状态并通知主窗口
+      let paused = false;
+      const pauseBtn = document.getElementById('vqPause');
+      pauseBtn.onclick = () => {
+        paused = !paused;
+        pauseBtn.textContent = paused ? '▶ 继续' : '⏸ 暂停';
+        window.vqAPI.pauseVoice(paused);
+      };
+      document.getElementById('vqClear').onclick = () => { window.vqAPI.clearVoice(); };
+      window.vqAPI.onData((d) => {
+        const now = d && d.now;
+        const q = (d && d.queue) || [];
+        const n = document.getElementById('vqNow');
+        n.innerHTML = now ? row(now).replace('（动态内容）', '（动态内容，播报时生成）') : '<span class="txt" style="color:#6f74a0;">（空闲）</span>';
+        document.getElementById('vqCount').textContent = q.length;
+        const box = document.getElementById('vqQueue');
+        if (!q.length) { box.innerHTML = '<div class="empty">无等待任务</div>'; return; }
+        box.innerHTML = q.map(row).join('');
+      });
+    }
+  </script>
+</body>
+</html>

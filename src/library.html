@@ -62,9 +62,11 @@
   #viewAI select, #viewAI input[type=text], #viewAI textarea { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #2a2d52; background: #0f1020; color: #e8e9f5; font-size: 13px; outline: none; }
   #viewAI textarea { resize: vertical; min-height: 110px; }
   .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-  .range { flex: 1; }
-  .range span { font-size: 12px; color: #cfd2ee; min-width: 42px; }
-  input[type=range] { flex: 1; accent-color: #8b5cff; }
+  .range { flex: 1; min-width: 150px; }
+  .range .rangeHead { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+  .range .rangeHead span { font-size: 12px; color: #cfd2ee; font-weight: 600; }
+  .range .rangeVal { font-style: normal; font-size: 12px; font-weight: 700; color: #fff; background: linear-gradient(135deg,#8b5cff,#ff5ca8); padding: 2px 10px; border-radius: 20px; min-width: 44px; text-align: center; box-shadow: 0 2px 8px rgba(139,92,255,.35); }
+  input[type=range] { flex: 1; accent-color: #8b5cff; cursor: pointer; }
   .btns { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
   #viewAI button { padding: 10px 16px; border-radius: 10px; border: none; cursor: pointer; font-weight: 600; font-size: 13px; }
   .primary { background: linear-gradient(135deg,#8b5cff,#ff5ca8); color: #fff; }
@@ -85,6 +87,8 @@
   .chip { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 11px; background: rgba(139,92,255,.2); color: #c9b8ff; margin-left: 8px; }
   .dmb { padding: 9px 18px; border-radius: 10px; border: none; cursor: pointer; font-size: 13px; font-weight: 600; transition: all .15s; white-space: nowrap; }
   .dmb-g { background: linear-gradient(135deg,#22d39a,#16a34a); color: #fff; }
+  .dmb-y { background: linear-gradient(135deg,#f0a020,#d97c00); color: #fff; }
+  .dmb-y:hover { background: linear-gradient(135deg,#f5b43a,#e8890a); }
   .dmb-r { background: linear-gradient(135deg,#ef4444,#b91c1c); color: #fff; }
   .dmb-b { background: #2a2d52; color: #cfd2ee; }
   .dmb-b:hover { background: #34376a; }
@@ -121,6 +125,34 @@
   #viewDanmaku .col .cfg-col .cfg-label { display: block; width: auto; flex: none; margin-bottom: 6px; }
   #viewDanmaku .col .cfg-col input { width: 100%; }
   #viewAI hr { border: none; border-top: 1px solid #2a2d52; margin: 18px 0 14px; }
+  /* ---- 声音克隆（viewVoice）深色样式 ---- */
+  #viewVoice .col { flex: 1; min-width: 0; background: #15162a; border: 1px solid #2a2d52; border-radius: 16px; padding: 22px; }
+  #viewVoice h2 { font-size: 18px; }
+  #viewVoice .sub { font-size: 12px; color: #9aa0c8; margin-bottom: 18px; }
+  #viewVoice .field { margin-bottom: 16px; }
+  #viewVoice .label { display: block; font-size: 12px; color: #9aa0c8; margin-bottom: 7px; }
+  #viewVoice input[type=text], #viewVoice textarea {
+    width: 100%; padding: 11px 14px; border-radius: 12px; border: 1px solid #2a2d52;
+    background: #0f1020; color: #e8e9f5; font-size: 14px; outline: none; transition: border-color .15s;
+  }
+  #viewVoice textarea { resize: vertical; min-height: 88px; }
+  #viewVoice input[type=text]:focus, #viewVoice textarea:focus { border-color: #8b5cff; }
+  #viewVoice input[readonly] {
+    flex: 1; min-width: 0; padding: 11px 14px; border-radius: 12px; border: 1px solid #2a2d52;
+    background: #161833; color: #cfd2ee; font-size: 13px; outline: none;
+  }
+  #viewVoice input[readonly]::placeholder { color: #6b7a99; font-size: 12px; }
+  #viewVoice button { padding: 10px 18px; border-radius: 11px; border: none; cursor: pointer; font-weight: 600; font-size: 13px; }
+  #viewVoice .btns { display: flex; gap: 10px; margin-top: 18px; }
+  #viewVoice .state { font-size: 12px; color: #22d39a; margin-top: 12px; min-height: 16px; }
+  #viewVoice .state.err { color: #ef4444; }
+  #viewVoice .dmb { padding: 8px 15px; border-radius: 10px; font-size: 12px; }
+  #viewDevice button { padding: 10px 20px; border-radius: 11px; border: none; cursor: pointer; font-weight: 600; font-size: 13px; transition: all .15s; white-space: nowrap; }
+  #viewDevice .primary:hover { filter: brightness(1.12); }
+  #viewDevice .ghost:hover { background: #34386a; color: #fff; }
+  #viewDevice .ghost:active, #viewDevice .primary:active { transform: scale(.97); }
+  #viewDevice select:focus { border-color: #8b5cff !important; box-shadow: 0 0 0 3px rgba(139,92,255,.2); }
+  #viewDevice .dev-card { background: #15162a; border: 1px solid #2a2d52; border-radius: 16px; padding: 22px 24px; max-width: 560px; }
 </style>
 </head>
 <body>
@@ -129,6 +161,9 @@
     <div class="side-item active" id="navLibrary">🎮 游戏库</div>
     <div class="side-item" id="navAI">🎙 AI 主播</div>
     <div class="side-item" id="navDanmaku">💬 弹幕回复</div>
+    <div class="side-item" id="navVoice">🎤 声音克隆</div>
+    <div class="side-item" id="navDevice">🔊 声音设备</div>
+    <button class="side-item" id="openVoiceQueue" style="border:none;cursor:pointer;text-align:left;background:#1c1e38;color:#e7e9f7;justify-content:flex-start;">🔊 语音队列</button>
     <div class="side-tip">小游戏直播客户端<br>录制回放 · AI 助播</div>
   </div>
   <div class="main">
@@ -147,18 +182,37 @@
     <div id="viewAI" style="display:none;padding:6px 28px 20px;">
       <div class="cols">
         <div class="col">
-          <h2>🎙 文本朗读 & 定时播报 <span class="chip">edge-tts 免费云端</span></h2>
-          <p class="sub">选声音 → 输入文案朗读；可定时自动随机播报</p>
-          <div class="field"><span class="label">声音（音色）</span><select id="voiceSel"></select></div>
-          <div class="field pth-row">
-            <span class="label" style="flex:none;margin:0;">.pth 模型</span>
-            <input id="modelPath" readonly placeholder="（预留）选择本地 .pth 声音模型，环境装好后可用">
-            <button class="ghost" id="pickModel" style="white-space:nowrap;">浏览</button>
+          <h2>🎙 文本朗读 & 定时播报 <span class="chip">edge-tts 免费云端 / 本地 GPT-SoVITS</span></h2>
+          <p class="sub">选引擎和音色 → 输入文案朗读；可定时自动随机播报</p>
+          <div class="field"><span class="label">语音引擎</span>
+            <select id="engineSel">
+              <option value="edge">云端微软晓晓（edge-tts）</option>
+              <option value="sovits">本地 GPT-SoVITS</option>
+            </select>
           </div>
+          <div class="field pth-row" id="voiceLibRow" style="display:none;">
+            <span class="label" style="flex:none;margin:0;">已克隆音色</span>
+            <select id="voiceLibSel" style="flex:1;"><option value="">（选一个已克隆音色，自动设音色）</option></select>
+          </div>
+          <div class="field" id="edgeFields"><span class="label">声音（音色）</span><select id="voiceSel"></select></div>
           <div class="row field">
-            <div class="range"><span>语速</span><input type="range" id="speed" min="0.5" max="2" step="0.1" value="1"></div>
-            <div class="range"><span>音量</span><input type="range" id="ttsVol" min="0" max="1" step="0.05" value="1"></div>
+            <div class="range"><div class="rangeHead"><span>语速</span><em class="rangeVal" id="speedVal">1.0</em></div><input type="range" id="speed" min="0.5" max="2" step="0.1" value="1"></div>
+            <div class="range"><div class="rangeHead"><span>音量</span><em class="rangeVal" id="ttsVolVal">1.00</em></div><input type="range" id="ttsVol" min="0" max="1" step="0.05" value="1"></div>
           </div>
+          <div class="row field pth-row" id="minChunkRow" style="display:none;">
+            <div class="range"><div class="rangeHead"><span>切块大小</span><em class="rangeVal" id="minChunkVal">40</em></div><input type="range" id="minChunk" min="10" max="100" step="1" value="40"></div>
+            <span class="label" style="flex:none;margin:0;font-size:11px;color:#9aa0c8;">流式切块（10~100），越大越连贯但首块稍慢</span>
+          </div>
+          <div class="row field pth-row" id="inferParamsRow" style="display:none;">
+            <div class="range"><div class="rangeHead"><span>温度</span><em class="rangeVal" id="temperatureVal">0.7</em></div><input type="range" id="temperature" min="0.2" max="1.2" step="0.1" value="0.7"></div>
+            <div class="range"><div class="rangeHead"><span>采样步数</span><em class="rangeVal" id="sampleStepsVal">32</em></div><input type="range" id="sampleSteps" min="16" max="64" step="4" value="32"></div>
+            <div class="range"><div class="rangeHead"><span>Top-K</span><em class="rangeVal" id="topKVal">20</em></div><input type="range" id="topK" min="1" max="50" step="1" value="20"></div>
+            <div class="range"><div class="rangeHead"><span>起播缓冲</span><em class="rangeVal" id="startBufferVal">500</em></div><input type="range" id="startBuffer" min="200" max="2000" step="50" value="500" title="攒够多少毫秒缓冲再开口：越大首字越稳但越慢"></div>
+            <div class="range"><div class="rangeHead"><span>低水位</span><em class="rangeVal" id="lowWaterVal">200</em></div><input type="range" id="lowWater" min="50" max="800" step="50" value="200" title="播放中缓冲低于此值暂停喂块，防断音"></div>
+            <div class="range"><div class="rangeHead"><span>高水位</span><em class="rangeVal" id="highWaterVal">800</em></div><input type="range" id="highWater" min="200" max="2000" step="50" value="800" title="暂停后攒够此值恢复播放"></div>
+            <button class="ghost" id="inferReset" title="恢复默认：温度0.7 / 采样步数32 / Top-K20 / 起播缓冲500ms / 低水位200ms / 高水位800ms" style="white-space:nowrap;flex:none;padding:8px 14px;">恢复默认</button>
+          </div>
+          <div id="inferParamsNote" style="display:none;margin-top:8px;"><span class="label" style="font-size:11px;color:#9aa0c8;line-height:1.6;word-break:break-all;">温度越低越稳；采样步数越高越自然但越慢（1060 建议 32）；起播缓冲越大首字越稳；低/高水位控制播放中防断音</span></div>
           <div class="field">
             <span class="label">输入要朗读的文案</span>
             <textarea id="ttsText" placeholder="欢迎来到我的小游戏直播间，喜欢的朋友点点关注，我们开始今天的休闲小游戏之旅～"></textarea>
@@ -216,11 +270,11 @@
           <div class="field"><button class="ghost" id="pickMusic" style="width:100%;">📂 选择音乐文件（mp3 / wav / ogg）</button></div>
           <div class="field">
             <span class="label">播放列表</span>
-            <ul id="playlist"></ul>
+            <ul id="playlist" style="max-height:180px;overflow-y:auto;"></ul>
             <button class="ghost" id="removeSel" style="width:100%;">移除选中</button>
           </div>
           <div class="row field">
-            <div class="range"><span>音乐音量</span><input type="range" id="bgmVol" min="0" max="1" step="0.05" value="0.3"></div>
+            <div class="range"><div class="rangeHead"><span>音乐音量</span><em class="rangeVal" id="bgmVolVal">0.30</em></div><input type="range" id="bgmVol" min="0" max="1" step="0.05" value="0.3"></div>
           </div>
           <div class="row field">
             <span class="label" style="flex:none;margin:0;">播放模式</span>
@@ -243,6 +297,53 @@
         </div>
       </div>
     </div>
+
+  <div id="viewVoice" style="display:none;padding:6px 28px 20px;width:100%;">
+    <div class="cols" style="align-items:flex-start;">
+      <div class="col" style="flex:1;min-width:0;">
+        <h2>🎤 克隆新音色</h2>
+        <p class="sub">零样本克隆专属音色，用于 AI 助播与弹幕播报（存到音色库，之后一键选用）</p>
+        <div class="field"><span class="label">音色名称</span><input type="text" id="vcName" placeholder="如：主播晓晓 / 甜美女声 / 磁性男声"></div>
+        <div class="field"><span class="label">参考文本（尽量与音频内容一致，提升克隆还原度）</span><textarea id="vcText" rows="3" placeholder="参考音频里说的那句话"></textarea></div>
+        <div class="field">
+          <span class="label">参考音频</span>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <input id="vcAudio" readonly placeholder="选择 5-10 秒人声（WAV/MP3）" style="flex:1;min-width:0;">
+            <button class="ghost" id="vcPickAudio" style="white-space:nowrap;flex:none;">选择文件</button>
+          </div>
+        </div>
+        <div class="btns">
+          <button class="primary" id="vcAdd">开始克隆</button>
+          <button class="ghost" id="vcClear">清空</button>
+        </div>
+        <div class="state" id="vcState"></div>
+      </div>
+      <div class="col" style="flex:1;min-width:0;">
+        <h2>🗂 已克隆音色 <button class="ghost" id="vcRefresh" style="margin-left:8px;padding:5px 14px;">刷新</button></h2>
+        <p class="sub" id="vcCount">共 0 个音色</p>
+        <div id="vcList" style="max-height:none;overflow:visible;"></div>
+      </div>
+    </div>
+
+    <!-- 编辑音色模态框 -->
+    <div id="vcEditModal" style="display:none;position:fixed;inset:0;background:rgba(8,9,20,0.7);z-index:1000;align-items:center;justify-content:center;">
+      <div style="background:#171830;border:1px solid #2a2d52;border-radius:16px;padding:24px;width:480px;max-width:92vw;">
+        <h2 style="font-size:17px;margin:0 0 16px;">✏️ 编辑音色</h2>
+        <div style="margin-bottom:14px;"><span class="label" style="display:block;font-size:12px;color:#9aa0c8;margin-bottom:6px;">音色名称</span><input type="text" id="vcEditName" style="width:100%;box-sizing:border-box;background:#10122a;border:1px solid #2a2d52;border-radius:10px;color:#e7e9f7;padding:10px 12px;font-size:13px;"></div>
+        <div style="margin-bottom:14px;"><span class="label" style="display:block;font-size:12px;color:#9aa0c8;margin-bottom:6px;">参考文本</span><textarea id="vcEditText" rows="3" style="width:100%;box-sizing:border-box;background:#10122a;border:1px solid #2a2d52;border-radius:10px;color:#e7e9f7;padding:10px 12px;font-size:13px;resize:vertical;" placeholder="参考音频里说的那句话"></textarea></div>
+        <div style="margin-bottom:16px;">
+          <span class="label" style="display:block;font-size:12px;color:#9aa0c8;margin-bottom:6px;">参考音频（不选则保持原音频）</span>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <input id="vcEditAudio" readonly placeholder="选择新的参考音频（可选）" style="flex:1;min-width:0;background:#10122a;border:1px solid #2a2d52;border-radius:10px;color:#e7e9f7;padding:10px 12px;font-size:13px;">
+            <button class="ghost" id="vcEditPick" style="white-space:nowrap;flex:none;">选择文件</button>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;justify-content:flex-end;">
+          <button class="ghost" id="vcEditCancel">取消</button>
+          <button class="primary" id="vcEditSave">保存</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div id="viewDanmaku" style="display:none;padding:6px 28px 20px;width:100%;">
@@ -260,6 +361,7 @@
         <button class="dmb dmb-b" id="dmShowLogin">👁 显示登录窗口</button>
         <button class="dmb dmb-b" id="dmHide">隐藏</button>
         <label class="switch"><input type="checkbox" id="dmAutoRead"> 自动朗读新弹幕</label>
+        <button class="dmb dmb-b" id="dmFilterRule" style="padding:5px 10px;font-size:12px;">📋 过滤规则</button>
         <span style="font-size:12px;color:#9aa0c8;">音色同 AI 主播</span>
       </div>
       <div class="row field" style="gap:12px;align-items:center;">
@@ -272,7 +374,7 @@
       <div class="dm-inter">
         <h3>🎙 弹幕语音互动</h3>
         <div class="row" style="gap:12px;align-items:center;">
-          <label class="switch"><input type="checkbox" id="dmIFilter" checked> 过滤系统消息</label>
+          <label class="switch"><input type="checkbox" id="dmIFilter" checked> 过滤事件消息</label>
           <span style="font-size:12px;color:#9aa0c8;">冷却</span>
           <input type="number" id="dmCool" value="5" min="0">
           <span style="font-size:12px;color:#9aa0c8;">分</span>
@@ -331,6 +433,8 @@
         <div class="cfg-row"><span class="cfg-label">Base URL</span><input id="zhipuBase" type="text" value="https://open.bigmodel.cn/api/paas/v4" style="flex:1;min-width:0;"></div>
         <div class="cfg-row"><span class="cfg-label">Model</span><input id="zhipuModel" type="text" value="glm-4.7-flash" style="flex:1;min-width:0;"></div>
       </div>
+      <div class="cfg-row"><span class="cfg-label">画面识别</span><label class="switch" style="flex:1;"><input type="checkbox" id="aiVisionOn"> 答疑时附当前屏幕画面（智谱视觉模型看图回答，免费）</label></div>
+      <div class="cfg-row"><span class="cfg-label">视觉模型</span><input id="aiVisionModel" type="text" value="glm-4.6v-flash" style="flex:1;min-width:0;"></div>
       <div class="ai-provider-card" data-p="silicon">
         <label class="ap-head"><input type="radio" name="aiProvider" value="silicon"> 硅基流动（2000万token）<span class="ap-code">silicon</span></label>
         <div class="cfg-row"><span class="cfg-label">API Key</span><input id="siliconKey" type="password" placeholder="sk-..." style="flex:1;min-width:0;"></div>
@@ -338,7 +442,7 @@
         <div class="cfg-row"><span class="cfg-label">Model</span><input id="siliconModel" type="text" value="deepseek-ai/DeepSeek-V3.1" style="flex:1;min-width:0;"></div>
       </div>
       <div class="field"><span class="label">主播描述 / 产品话术</span>
-        <textarea id="aiPrompt" rows="3">我是一个小游戏主播，请口语化回答用户提出的问题，现在我播的游戏是我要动个脑</textarea></div>
+        <textarea id="aiPrompt" rows="3">我是一个小游戏主播，我现在玩的游戏是我要动个脑，如果有用户问玩的什么游戏，请替我回答，只回答用户的提问，其他弹幕不用回答，如果用户问什么游戏，用不同的风格去回复用户，字数在15个字左右</textarea></div>
       <div class="field"><span class="label">过滤关键词（分号分隔，弹幕含这些词不触发AI答疑）</span>
         <input type="text" id="aiFilter" placeholder="哈哈 AI 假的"></div>
       <div class="cfg-row" style="gap:12px;">
@@ -359,6 +463,29 @@
       </div>
       <div id="aiLog" style="height:180px;overflow-y:auto;background:#0f1020;border:1px solid #2a2d52;border-radius:10px;padding:10px;font-size:12px;color:#9aa0c8;">等待弹幕问题...</div>
     </div>
+    </div>
+    </div>
+
+    <!-- 声音设备设置页 -->
+    <div id="viewDevice" style="display:none;padding:26px 28px 20px;width:100%;">
+      <h2 style="font-size:18px;margin-bottom:6px;">🔊 声音设备</h2>
+      <p class="sub" style="font-size:12px;color:#9aa0c8;margin-bottom:18px;max-width:560px;line-height:1.6;">选择语音（AI 播报/弹幕朗读）输出到哪个音频设备。要进直播间请在左侧安装虚拟声卡（如 Voicemeeter），并在此把输出指到虚拟声卡。</p>
+      <div class="dev-card">
+        <div class="field">
+          <span class="label" style="display:block;font-size:12px;color:#9aa0c8;margin-bottom:7px;">语音输出设备</span>
+          <select id="deviceOut" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid #2a2d52;background:#0f1020;color:#e8e9f5;font-size:13px;outline:none;">
+            <option value="default">系统默认扬声器</option>
+          </select>
+          <div style="margin-top:8px;font-size:11px;color:#5a5f85;">选到虚拟声卡（名字含 Voicemeeter / CABLE Output）后，AI 语音就会从虚拟声卡输出，抖音直播伴侣把它当麦克风采集。</div>
+        </div>
+        <div class="btns" style="display:flex;gap:10px;margin-top:18px;flex-wrap:wrap;">
+          <button class="primary" id="deviceRefresh">🔄 刷新设备</button>
+          <button class="ghost" id="deviceApply">保存</button>
+          <button class="ghost" id="deviceGuide">📖 使用指南</button>
+          <button class="ghost" id="deviceOpenDir">💻 软件安装</button>
+        </div>
+        <div class="state" id="deviceState" style="font-size:12px;color:#22d39a;margin-top:12px;min-height:16px;"></div>
+      </div>
     </div>
   </div>
 
@@ -418,7 +545,7 @@
       card.className = 'card';
       card.style.background = 'linear-gradient(135deg,' + color + ',' + shade(color) + ')';
       card.innerHTML =
-        '<div><span class="tag">可游玩</span><h3>' + g.name + '</h3><p>' + (g.desc||'') + '</p></div>' +
+        '<div><span class="tag">可游玩</span><h3>' + g.name + ' <span style="font-size:11px;opacity:.7;font-weight:normal">#' + g.id + '</span></h3><p>' + (g.desc||'') + '</p></div>' +
         '<div class="row"><span class="cat">' + (g.category||'') + '</span><span class="ops"><button class="edit">编辑</button><button class="del">删除</button><button class="start">开始 ▶</button></span></div>';
       card.querySelector('.start').onclick = (e) => { e.stopPropagation(); window.api.startGame(g.id); };
       card.querySelector('.edit').onclick = (e) => { e.stopPropagation(); openEdit(g); };
@@ -455,13 +582,21 @@
     document.getElementById('navLibrary').classList.toggle('active', active === 'lib');
     document.getElementById('navAI').classList.toggle('active', active === 'ai');
     document.getElementById('navDanmaku').classList.toggle('active', active === 'dm');
+    document.getElementById('navVoice').classList.toggle('active', active === 'vc');
+    document.getElementById('navDevice').classList.toggle('active', active === 'dev');
     document.getElementById('viewLibrary').style.display = active === 'lib' ? '' : 'none';
     document.getElementById('viewAI').style.display = active === 'ai' ? '' : 'none';
     document.getElementById('viewDanmaku').style.display = active === 'dm' ? 'flex' : 'none';
+    document.getElementById('viewVoice').style.display = active === 'vc' ? 'flex' : 'none';
+    document.getElementById('viewDevice').style.display = active === 'dev' ? 'block' : 'none';
+    if (active === 'vc') loadVoices();
+    if (active === 'dev') loadDevices();
   }
   document.getElementById('navLibrary').onclick = () => setNav('lib');
   document.getElementById('navAI').onclick = () => setNav('ai');
   document.getElementById('navDanmaku').onclick = () => setNav('dm');
+  document.getElementById('navVoice').onclick = () => setNav('vc');
+  document.getElementById('navDevice').onclick = () => setNav('dev');
   function openEdit(g) { openModal('编辑游戏', g); }
   async function delGame(g) {
     if (!confirm('删除「' + g.name + '」？')) return;
@@ -494,7 +629,7 @@
   const voiceAudio = new Audio();
   const loopAudio = new Audio(); // 循环朗读独立音轨
   const bgmAudio = new Audio();
-  const playList = [];
+  let playList = []; // 元素 {path,name,size,duration}
   let timer = null;        // 定时播报（随机秒数）链
   let clockTimer = null;   // 报时（每 X 分钟）
   const voiceQueue = [];   // 语音队列：定时播报 / 报时 / 手动朗读 排队依次播，不互相打断
@@ -504,12 +639,14 @@
   const setState = (id, msg, err) => { const el = document.getElementById(id); el.textContent = msg; el.className = 'state' + (err ? ' err' : ''); };
 
   // 队列播放：播完一条才播下一条
-  function pumpVoice() {
+  async function pumpVoice() {
     if (voicePlaying) return;
     if (!voiceQueue.length) { voicePlaying = false; return; }
     voicePlaying = true;
     const item = voiceQueue.shift();
     voiceAudio.volume = +document.getElementById('ttsVol').value;
+    // 应用声音设备页选择的输出设备（若选了虚拟声卡）
+    try { if (curSinkId && voiceAudio.setSinkId) await voiceAudio.setSinkId(curSinkId); } catch (e) {}
     voiceAudio.src = item.url;
     voiceAudio.onended = () => { if (bgmAudio.src) bgmAudio.volume = +document.getElementById('bgmVol').value; voicePlaying = false; pumpVoice(); };
     voiceAudio.play();
@@ -517,18 +654,414 @@
   function playVoice(url, tag = 'general') { voiceQueue.push({ url, tag }); pumpVoice(); }
   function clearVoice() { voiceQueue.length = 0; voiceAudio.pause(); voiceAudio.currentTime = 0; voicePlaying = false; }
 
+  // ---- 流式播放器（本地 GPT-SoVITS streaming_mode=2 raw PCM，边收边播）----
+  let sCtx = null;            // AudioContext
+  let sComp = null;           // 压缩器（提升响度、防爆音）
+  let sGain = null;           // 增益
+  let sBufferQ = [];          // 待播 AudioBuffer 队列
+  let sNextTime = 0;          // 下一个 chunk 应开始的时钟时间
+  let sPlaying = false;       // 是否已起播（时间轴已启动）
+  let sPaused = false;        // 播放中是否因低水位暂停喂块（服务端合成跟不上）
+  let sEos = false;           // 服务端是否已推完 end（之后不再按低水位暂停，直接播完）
+  let sFirstArriveAt = 0;     // 首块到达时间戳(ms)，用于计算 waitedMs
+  let sForceStart = false;    // 兼容保留：收到 end 后强制起播
+  const SR = 32000;
+  // ===== 播放策略（PUMP_CONFIG，客户端滑杆可调） =====
+  function pumpConfig() {
+    const g = id => { const el = document.getElementById(id); return el ? parseFloat(el.value) : null; };
+    const start = g('startBuffer') ?? 500;   // 起播缓冲(ms)：够这个值才开口
+    const low   = g('lowWater')  ?? 200;     // 低水位(ms)：播放中低于此值暂停喂块
+    const high  = g('highWater') ?? 800;     // 高水位(ms)：攒够此值恢复喂块
+    const cfg = {
+      startBufferMs: clamp(start, 200, 3000),
+      lowWaterMs:    clamp(low, 50, 1000),
+      highWaterMs:   clamp(high, 200, 2000),
+    };
+    if (cfg.highWaterMs < cfg.lowWaterMs) cfg.highWaterMs = cfg.lowWaterMs + 200;
+    return cfg;
+  }
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+  // 起播判断：只用两条——eos（整段推完）必播 + 总缓冲≥起播缓冲 才开口
+  function shouldStartPlayback(cfg, ctx) {
+    if (ctx.started) return false;
+    if (ctx.bufferedMs <= 0) return false;
+    if (ctx.eos) return true;                                  // 短文本/end：有数据必播
+    return ctx.bufferedMs >= cfg.startBufferMs;                // 缓冲够就播
+  }
+  function shouldPauseForBuffer(cfg, ctx) { return ctx.started && ctx.playing && !ctx.eos && ctx.bufferedMs < cfg.lowWaterMs; }
+  function shouldResumeFromBuffer(cfg, ctx) { return ctx.started && ctx.paused && !ctx.eos && ctx.bufferedMs >= cfg.highWaterMs; }
+
+  function ensureSink() {
+    if (!sCtx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      sCtx = new AC();
+      // 应用声音设备页选择的输出设备（若选了虚拟声卡）
+      try { if (curSinkId && sCtx.setSinkId) sCtx.setSinkId(curSinkId); } catch (e) {}
+      // 响度归一：压缩 + 增益，把 -37LUFS 拉到直播常用响度且不削波
+      sComp = sCtx.createDynamicsCompressor();
+      sComp.threshold.value = -24;   // 超过此电平开始压缩
+      sComp.knee.value = 10;
+      sComp.ratio.value = 6;
+      sComp.attack.value = 0.005;
+      sComp.release.value = 0.15;
+      sGain = sCtx.createGain();
+      sGain.gain.value = 1.8;        // 提升整体音量
+      sComp.connect(sGain).connect(sCtx.destination);
+    }
+    if (sCtx.state === 'suspended') sCtx.resume();
+    return sCtx;
+  }
+  function sStopPlay() {
+    sPlaying = false; sBufferQ = []; sPrimedDur = 0; sForceStart = false;
+    sPaused = false; sEos = false; sFirstArriveAt = 0;
+    if (sCtx) { sCtx.close().catch(() => {}); sCtx = null; sComp = null; sGain = null; }
+  }
+  function sFeedB64(b64, sr) {
+    const ctx = ensureSink();
+    const raw = atob(b64);
+    const n = raw.length / 2;
+    const f = new Float32Array(n);
+    const s16 = new Int16Array(n); // 直接按有符号 16-bit little-endian 解析
+    for (let i = 0; i < n; i++) s16[i] = raw.charCodeAt(i * 2) | (raw.charCodeAt(i * 2 + 1) << 8);
+    for (let i = 0; i < n; i++) f[i] = s16[i] / 32768;
+    const buf = ctx.createBuffer(1, f.length, sr || SR);
+    buf.copyToChannel(f, 0);
+    if (!sFirstArriveAt) sFirstArriveAt = Date.now();
+    sBufferQ.push(buf);
+    pumpSink();
+  }
+  let sPrimedDur = 0;    // 已缓冲时长(秒)，用于起播前的预缓冲（保留字段兼容）
+  // 计算"未播放缓冲时长(ms)"：队列里已排进时间轴但还没播完的（= sNextTime - currentTime）
+  // + 队列里还没排的块时长
+  function bufferedMsNow() {
+    const ctx = sCtx;
+    let scheduled = 0;
+    if (ctx) scheduled = (sNextTime - ctx.currentTime) * 1000;
+    if (scheduled < 0) scheduled = 0;
+    for (const b of sBufferQ) scheduled += b.duration * 1000;
+    return scheduled;
+  }
+  function pumpSink() {
+    const ctx = sCtx; if (!ctx) return;
+    const cfg = pumpConfig();
+    // 合并过短首块：如果第一块太小(<0.6s，服务端静音切块可能切出前1-2字的碎块)且队列≥2，
+    // 把前两块拼成一个连续段，避免开头是孤零零的小块造成"前两个字微卡"
+    if (sBufferQ.length >= 2 && sBufferQ[0].duration < 0.6) {
+      const a = sBufferQ[0], b = sBufferQ[1];
+      if (a.sampleRate === b.sampleRate && a.numberOfChannels === b.numberOfChannels) {
+        const merged = ctx.createBuffer(a.numberOfChannels, a.length + b.length, a.sampleRate);
+        for (let ch = 0; ch < a.numberOfChannels; ch++) {
+          const da = a.getChannelData(ch), db = b.getChannelData(ch), dm = merged.getChannelData(ch);
+          dm.set(da, 0); dm.set(db, a.length);
+        }
+        sBufferQ.shift(); sBufferQ[0] = merged;
+      }
+    }
+    const bufferedMs = bufferedMsNow();
+    const waitedMs = sFirstArriveAt ? Date.now() - sFirstArriveAt : 0;
+    if (!sPlaying) {
+      // ---- 未起播：用 PUMP_CONFIG 判断是否开口 ----
+      if (!shouldStartPlayback(cfg, {
+        started: false, bufferedMs, chunkCount: sBufferQ.length, eos: sEos, waitedMs
+      })) return;
+      sPlaying = true; sPaused = false;
+      sNextTime = ctx.currentTime + 0.05;   // 起播：建立时间轴起点
+    }
+    // ---- 播放中：水位控制 ----
+    if (sPlaying && !sPaused && !sEos && shouldPauseForBuffer(cfg, { started: sPlaying, playing: true, eos: sEos, bufferedMs })) {
+      sPaused = true;                        // 缓冲见底 → 暂停喂新块，等攒回高水位
+      return;
+    }
+    if (sPaused && shouldResumeFromBuffer(cfg, { started: sPlaying, paused: true, eos: sEos, bufferedMs })) {
+      sPaused = false;                       // 攒够高水位 → 恢复喂块
+    }
+    // ---- 逐块喂入时间轴（受高水位节流，防积压） ----
+    while (sBufferQ.length) {
+      const src = ctx.createBufferSource(); src.buffer = sBufferQ.shift();
+      src.connect(sComp || ctx.destination); // 经过压缩+增益链
+      if (sNextTime <= ctx.currentTime) sNextTime = ctx.currentTime + 0.05;
+      src.start(sNextTime);
+      sNextTime += src.buffer.duration;
+      // 高水位节流：已排未播缓冲 ≥ highWater 就停下，让喇叭先消耗（防无限积压）
+      if (!sEos && (sNextTime - ctx.currentTime) * 1000 >= cfg.highWaterMs) break;
+    }
+  }
+  // 流式朗读入口
+  function speakStream(text, refAudio, speed) {
+    return new Promise((resolve) => {
+      let settled = false;
+      let off = null;
+      const done = (r) => { if (settled) return; settled = true; if (off) off(); sStopPlay(); resolve(r); };
+      sStopPlay(); sNextTime = 0;
+      off = window.api.onSovitsChunk((msg) => {
+        if (msg.type === 'chunk') sFeedB64(msg.buf, msg.sr);
+        else if (msg.type === 'end') {
+          sEos = true;                // 整段推完：shouldStartPlayback 的 eos 条件会强制起播（有数据必播）
+          pumpSink();                 // 立即触发起播 / 把剩余块喂完
+          sWaitDone(() => done({ ok: true }));
+        }
+      });
+      window.api.sovitsStream({ text, refAudio, speed, minChunk: +document.getElementById('minChunk').value,
+        temperature: +document.getElementById('temperature').value,
+        sampleSteps: +document.getElementById('sampleSteps').value,
+        topK: +document.getElementById('topK').value })
+        .then(r => { if (!r.ok) done({ ok: false, err: r.err }); })
+        .catch(() => done({ ok: false, err: '流式请求异常' }));
+      function sWaitDone(cb) {
+        const tick = () => {
+          if (!sCtx) { cb(); return; }
+          if (!sBufferQ.length && sCtx.currentTime >= sNextTime - 0.08) { sPlaying = false; cb(); }
+          else setTimeout(tick, 120);
+        };
+        tick();
+      }
+      window.__stopStream = () => { done({ ok: false, err: '已停止' }); };
+    });
+  }
+
   function stopLoop() { loopAudio.pause(); loopAudio.currentTime = 0; loopAudio.loop = false; }
+  // 等待当前本地流式播放空闲（报时用）：若正在播报/朗读则等它播完，带超时兜底避免卡死
+  function sWaitIdle(timeout) {
+    const limit = timeout || 25000; // 最多等 25s，超时强制放行（防止某条流式卡住导致报时永远等不到）
+    const start = Date.now();
+    return new Promise(res => {
+      const tick = () => {
+        const idle = !sCtx || (!sPlaying && !sBufferQ.length);
+        if (idle || Date.now() - start > limit) { res(); return; }
+        setTimeout(tick, 150);
+      };
+      tick();
+    });
+  }
+  // ================= 统一语音调度器（addTask + 任务队列，严格串行） =================
+  // 所有语音出口（手动朗读/定时播报/报时/弹幕事件）都经 addTask 进唯一队列，
+  // 调度器每次只播一条，播完（resolve）才调下一条，杜绝抢麦。
+  const taskQueue = [];          // 待播任务队列
+  let isPlaying = false;         // 调度器互斥锁
+  let taskIdSeq = 0;             // 任务自增 id
+  let currentTask = null;        // 当前正在播报的任务（已被 shift 出队列）
+  // 读取任务队列快照（供看板实时显示）：返回 { now, queue:[] }
+  function taskQueueStatus() {
+    const fmt = (t) => {
+      const raw = typeof t.text === 'function' ? '' : t.text;
+      return { id: t.id, type: t.type, tag: t.tag, text: raw, fn: typeof t.text === 'function' };
+    };
+    return { now: currentTask ? fmt(currentTask) : null, queue: taskQueue.map(fmt) };
+  }
+  // 事件合并：队列中已有同 tag 未播任务 → 覆盖旧的（防弹幕/事件积压）。
+  // 带模板的任务合并时保留模板句(tpl)，只换变量(tplV)与渲染文本——模板不重新挑选。
+  function addTask(t) {
+    const tag = t.tag || '';
+    if (t.type === 'EVENT' && tag) {
+      const found = taskQueue.find(x => x.type === 'EVENT' && x.tag === tag);
+      if (found) {
+        found.text = t.text;
+        found.tpl = t.tpl || found.tpl;   // 没有新模板句就保留原来的（不换模板）
+        found.tplV = t.tplV || found.tplV;
+        found.timestamp = Date.now();
+        triggerScheduler();
+        return;
+      }
+    }
+    taskQueue.push({
+      id: String(++taskIdSeq), type: t.type || 'READ',
+      text: t.text, tag,
+      tpl: t.tpl || null, tplV: t.tplV || null, // 延迟渲染：播报瞬间才按模板句+变量生成文本
+      callback: t.callback || (() => {}),
+      timestamp: Date.now(),
+      engine: t.engine || 'auto'
+    });
+    triggerScheduler();
+  }
+  async function triggerScheduler() {
+    if (isPlaying || !taskQueue.length) return;
+    isPlaying = true;
+    const task = taskQueue.shift();
+    currentTask = task;
+    try {
+      // 过期丢弃：超过 30s 的旧任务直接丢（主要针对事件/报时）
+      if (Date.now() - task.timestamp > 30000) { isPlaying = false; currentTask = null; return triggerScheduler(); }
+      // 延迟求值：播报瞬间才生成文本。模板任务按"模板句+最新变量"渲染；报时/定时内容用函数；其余用已渲染文本
+      const finalText = task.tpl ? cleanForTTS(dmTpl(task.tpl, task.tplV)) : (typeof task.text === 'function' ? task.text() : task.text);
+      if (finalText) await playTTS(finalText, task.engine);
+      // 播完回调（通常用于重新启动倒计时）
+      try { task.callback(); } catch (e) {}
+    } finally {
+      currentTask = null;
+      isPlaying = false;
+      return triggerScheduler(); // 队列还有任务就继续，直到空
+    }
+  }
+  // 按引擎分派播放：本地流式（秒出）/ 云端整段。必须 resolve=音频真正播完
+  async function playTTS(text, engine) {
+    const eng = (engine && engine !== 'auto') ? engine : engineValue();
+    if (eng === 'sovits') {
+      const ra = refAudioValue();
+      if (!ra) return { ok: false, err: '未选音色' };
+      const r = await speakStream(text, ra, +document.getElementById('speed').value);
+      return r;
+    }
+    const r = await window.api.tts({ text, engine: eng, voice: voiceSel.value, refAudio: refAudioValue(), speed: +document.getElementById('speed').value, ...inferParamsObj() });
+    if (!r.ok) return r;
+    return await playVoiceAndDone(r.url);
+  }
+  // 云端播放并等待真正播完
+  async function playVoiceAndDone(url) {
+    return new Promise(async res => {
+      voiceAudio.volume = +document.getElementById('ttsVol').value;
+      if (bgmAudio.src) bgmAudio.volume = +document.getElementById('bgmVol').value;
+      voiceAudio.onended = () => { res({ ok: true }); };
+      voiceAudio.onerror = () => { res({ ok: false, err: '播放失败' }); };
+      // 应用声音设备页选择的输出设备（若选了虚拟声卡）
+      try { if (curSinkId && voiceAudio.setSinkId) await voiceAudio.setSinkId(curSinkId); } catch (e) {}
+      voiceAudio.src = url;
+      voiceAudio.play();
+    });
+  }
+  // 停止：清空队列 + 中断正在播放
+  function stopAllVoice() {
+    taskQueue.length = 0;
+    currentTask = null;
+    try { if (window.__stopStream) window.__stopStream(); } catch (e) {}
+    voiceAudio.pause(); voiceAudio.onended = null; voiceAudio.onerror = null;
+    sStopPlay();
+  }
+  // 清空等待队列：只丢掉还没开始播的任务，正在播报的让它播完
+  function clearVoiceQueue() {
+    taskQueue.length = 0;
+  }
+  // 暂停当前正在播报的语音（流式 AudioContext / 云端 audio 都支持，恢复后从暂停处继续）
+  let voicePaused = false;
+  function pauseVoice() {
+    voicePaused = true;
+    try { if (sCtx && sCtx.state === 'running') sCtx.suspend(); } catch (e) {}
+    if (!voiceAudio.paused) { voiceAudio.pause(); }
+  }
+  function resumeVoice() {
+    voicePaused = false;
+    try { if (sCtx && sCtx.state === 'suspended') sCtx.resume(); } catch (e) {}
+    if (voiceAudio.src && voiceAudio.paused) voiceAudio.play().catch(() => {});
+  }
+  // 查询队列是否还有某 tag 的未播任务（供外部判断/取消）
+  function hasTask(tag) { return taskQueue.some(x => x.tag === tag); }
+  // 取消队列中某 tag 的所有未播任务
+  function cancelTasks(tag) { for (let i = taskQueue.length - 1; i >= 0; i--) if (taskQueue[i].tag === tag) taskQueue.splice(i, 1); }
+
+  // 语音任务队列已移至独立窗口（侧边栏「语音队列」），由 voice-queue.html 实时展示，此处不再内嵌看板。
+  setInterval(() => { try { window.api.syncVoiceQueue(taskQueueStatus()); } catch (e) {} }, 500);
+  // ---- 引擎切换 ----
+  function engineValue() { return document.getElementById('engineSel').value; }
+  window.__voiceList = []; // 音色库缓存（供 refAudioValue / 选中预热使用）
+  // 本地引擎音色：从"已克隆音色"下拉选中的音色取参考音频路径
+  function refAudioValue() {
+    const sel = document.getElementById('voiceLibSel');
+    const id = sel && sel.value;
+    if (!id) return '';
+    const v = window.__voiceList.find(x => x.id === id);
+    return v ? v.refAudio : '';
+  }
+  // 推理参数（温度 / 采样步数 / Top-K），仅在本地引擎下生效
+  function inferParamsObj() {
+    const g = id => document.getElementById(id);
+    const t = g('temperature'), s = g('sampleSteps'), k = g('topK');
+    const o = {};
+    if (t) o.temperature = +t.value;
+    if (s) o.sampleSteps = +s.value;
+    if (k) o.topK = +k.value;
+    return o;
+  }
+  // 恢复推理参数到默认值（防止调乱）
+  const inferDefaults = { temperature: 0.7, sampleSteps: 32, topK: 20, startBuffer: 500, lowWater: 200, highWater: 800 };
+  function resetInferParams() {
+    const g = id => document.getElementById(id);
+    const t = g('temperature'), s = g('sampleSteps'), k = g('topK'),
+          sb = g('startBuffer'), lw = g('lowWater'), hw = g('highWater');
+    if (t) t.value = inferDefaults.temperature;
+    if (s) s.value = inferDefaults.sampleSteps;
+    if (k) k.value = inferDefaults.topK;
+    if (sb) sb.value = inferDefaults.startBuffer;
+    if (lw) lw.value = inferDefaults.lowWater;
+    if (hw) hw.value = inferDefaults.highWater;
+    // 同步滑杆数值显示
+    const tv = g('temperatureVal'), sv = g('sampleStepsVal'), kv = g('topKVal'),
+          sbv = g('startBufferVal'), lwv = g('lowWaterVal'), hwv = g('highWaterVal');
+    if (tv) tv.textContent = inferDefaults.temperature.toFixed(1);
+    if (sv) sv.textContent = String(inferDefaults.sampleSteps);
+    if (kv) kv.textContent = String(inferDefaults.topK);
+    if (sbv) sbv.textContent = String(inferDefaults.startBuffer);
+    if (lwv) lwv.textContent = String(inferDefaults.lowWater);
+    if (hwv) hwv.textContent = String(inferDefaults.highWater);
+    setState('ttsState', '推理参数已恢复默认（温度0.7 / 采样步数32 / Top-K20 / 起播500ms / 低200ms / 高800ms）', false);
+  }
+  const inferResetBtn = document.getElementById('inferReset');
+  if (inferResetBtn) inferResetBtn.onclick = resetInferParams;
+  // ---- 滑杆实时数值显示 ----
+  function bindRangeVals() {
+    const binds = [
+      ['speed', 'speedVal', v => (+v).toFixed(1)],
+      ['ttsVol', 'ttsVolVal', v => (+v).toFixed(2)],
+      ['bgmVol', 'bgmVolVal', v => (+v).toFixed(2)],
+      ['minChunk', 'minChunkVal', v => String(Math.round(v))],
+      ['temperature', 'temperatureVal', v => (+v).toFixed(1)],
+      ['sampleSteps', 'sampleStepsVal', v => String(Math.round(v))],
+      ['topK', 'topKVal', v => String(Math.round(v))],
+      ['startBuffer', 'startBufferVal', v => String(Math.round(v))],
+      ['lowWater', 'lowWaterVal', v => String(Math.round(v))],
+      ['highWater', 'highWaterVal', v => String(Math.round(v))]
+    ];
+    binds.forEach(([inId, outId, fmt]) => {
+      const inp = document.getElementById(inId), out = document.getElementById(outId);
+      if (!inp || !out) return;
+      const upd = () => { out.textContent = fmt(inp.value); };
+      upd();
+      inp.addEventListener('input', upd);
+    });
+  }
+  function setEngineUI(sovits) {
+    document.getElementById('edgeFields').style.display = sovits ? 'none' : 'block';
+    document.getElementById('minChunkRow').style.display = sovits ? 'flex' : 'none';
+    document.getElementById('inferParamsRow').style.display = sovits ? 'flex' : 'none';
+    document.getElementById('inferParamsNote').style.display = sovits ? 'block' : 'none';
+    document.getElementById('voiceLibRow').style.display = sovits ? 'flex' : 'none';
+    if (sovits) loadVoiceLibSel();
+  }
+  // 填充"已克隆音色"下拉（本地引擎用）
+  async function loadVoiceLibSel() {
+    try {
+      const list = await window.api.listVoices() || [];
+      window.__voiceList = list;
+      const sel = document.getElementById('voiceLibSel');
+      const cur = sel.value;
+      sel.innerHTML = '<option value="">（选一个已克隆音色，自动设音色）</option>' +
+        list.map(v => `<option value="${v.id}">${v.name}</option>`).join('');
+      if (cur && list.some(v => v.id === cur)) sel.value = cur;
+      // 若之前已选中音色，重新填下拉后仍保持选中，预热状态显示沿用
+      if (sel.value) setState('ttsState', '已选用音色，可直接朗读');
+    } catch (e) {}
+  }
+  // 选中已克隆音色 → 自动设为参考音频并自动预热
+  document.getElementById('voiceLibSel').onchange = async (e) => {
+    const id = e.target.value;
+    if (!id) { setState('ttsState', '请选择已克隆音色'); return; }
+    const v = window.__voiceList.find(x => x.id === id);
+    if (!v) return;
+    setState('ttsState', '已选用「' + v.name + '」，正在预热…');
+    const r = await window.api.warmup(v.refAudio);
+    if (r.ok) setState('ttsState', '✅ 已选用「' + v.name + '」并预热，可直接朗读', false);
+    else setState('ttsState', '❌ 预热失败：' + (r.err || '音色音频时长需在 3~10 秒'), true);
+  };
+  document.getElementById('engineSel').onchange = (e) => setEngineUI(e.target.value === 'sovits');
   let ttsStopped = false; // 停止标志（防止"播放完成"覆盖"已停止"）
-  async function speak(text) {
+  // 手动朗读：入队 READ 任务（严格串行，等当前播完再播本条）；resolve=本条播完
+  function speak(text, opts) {
     stopLoop();
-    if (!text) { setState('ttsState', '请先输入文案', true); return; }
-    setState('ttsState', '合成中…');
-    const r = await window.api.tts({ text, voice: voiceSel.value, speed: +document.getElementById('speed').value });
-    if (!r.ok) { setState('ttsState', '合成失败：' + r.err, true); return; }
-    playVoice(r.url);
-    setState('ttsState', '播放中…');
-    await waitVoiceDone();
-    if (!ttsStopped) setState('ttsState', '播放完成');
+    if (!text) { setState('ttsState', '请先输入文案', true); return Promise.resolve(); }
+    if (engineValue() === 'sovits' && !refAudioValue()) { setState('ttsState', '请先选择参考音频（音色）', true); return Promise.resolve(); }
+    setState('ttsState', '已排队…');
+    const o = opts || {};
+    return new Promise(res => {
+      addTask({ type: 'READ', tag: 'read', text, engine: o.engine || 'auto', callback: () => { if (!ttsStopped) setState('ttsState', '播放完成'); res(); } });
+    });
   }
   function setTtsBtnRunning(on) {
     const b = document.getElementById('ttsBtn');
@@ -539,9 +1072,10 @@
   async function speakLoop(text) {
     stopLoop();
     if (!text) { setState('ttsState', '请先输入文案', true); setTtsBtnRunning(false); return; }
+    if (engineValue() === 'sovits' && !refAudioValue()) { setState('ttsState', '请先选择参考音频（音色）', true); setTtsBtnRunning(false); return; }
     clearVoice();
     setState('ttsState', '合成中…');
-    const r = await window.api.tts({ text, voice: voiceSel.value, speed: +document.getElementById('speed').value });
+    const r = await window.api.tts({ text, engine: engineValue(), voice: voiceSel.value, refAudio: refAudioValue(), speed: +document.getElementById('speed').value, ...inferParamsObj() });
     if (!r.ok) { setState('ttsState', '合成失败：' + r.err, true); setTtsBtnRunning(false); return; }
     loopAudio.volume = +document.getElementById('ttsVol').value;
     loopAudio.src = r.url;
@@ -558,7 +1092,7 @@
     if (document.getElementById('loopRead').checked) await speakLoop(text);
     else { try { await speak(text); } finally { setTtsBtnRunning(false); } }
   };
-  document.getElementById('stopTts').onclick = () => { ttsStopped = true; stopLoop(); if (loopStopResolve) { loopStopResolve(); loopStopResolve = null; } clearVoice(); setTtsBtnRunning(false); setState('ttsState', '已停止'); };
+  document.getElementById('stopTts').onclick = () => { ttsStopped = true; stopLoop(); if (loopStopResolve) { loopStopResolve(); loopStopResolve = null; } stopAllVoice(); setTtsBtnRunning(false); setState('ttsState', '已停止'); };
 
   function getLines() { return document.getElementById('lines').value.split('\n').map(s => s.trim()).filter(Boolean); }
   const RECENT = 5;      // 边界防撞：新一轮开头避开最近这 5 条
@@ -598,16 +1132,25 @@
       voiceAudio.addEventListener('ended', done);
     });
   }
-  async function playOne() {
+  // 定时播报：入队一条 CONTENT 任务，播完回调 rearmNext() 重新倒计时
+  // （严格串行：即使报时/事件排在前面，这条也等它们播完再播）
+  function playOne() {
     const line = pickLine();
     if (!line) { setState('timerState', '播报列表为空，请先填写', true); return; }
     const duck = document.getElementById('duck').value === 'low';
     if (duck && bgmAudio.src) bgmAudio.volume = +document.getElementById('bgmVol').value * 0.15;
-    const r = await window.api.tts({ text: line, voice: voiceSel.value, speed: +document.getElementById('speed').value });
-    if (!r.ok) return;
-    playVoice(r.url);
     setState('timerState', '播报：' + line);
-    await waitVoiceDone(); // 播完才返回，间隔从上一条播完开始算
+    addTask({
+      type: 'CONTENT', tag: 'content', text: line,
+      callback: () => { if (!stoppedFlag) rearmNext(); } // 播完 → 重新倒计时下一条
+    });
+  }
+  // 播完一条后再随机间隔，再入队下一条（间隔从上一条播完开始算）
+  function rearmNext() {
+    if (stoppedFlag) return;
+    const d = intervalSec();
+    nextAt = Date.now() + d;
+    timer = setTimeout(playOne, d);
   }
   let nextAt = 0;          // 距下次播报的时间戳
   let clockNextAt = 0;     // 距下次报时的时间戳
@@ -635,16 +1178,8 @@
   function schedule() {
     clearTimeout(timer);
     stoppedFlag = false;
-    const loop = async () => {
-      await playOne();
-      if (stoppedFlag) return; // 已停止：不再排下一次
-      const d = intervalSec();
-      nextAt = Date.now() + d;
-      timer = setTimeout(loop, d);
-    };
-    const d = intervalSec();
-    nextAt = Date.now() + d;
-    timer = setTimeout(loop, d);
+    // 启动：先等一个随机间隔，然后入队第一条（播完回调 rearmNext 继续循环）
+    rearmNext();
   }
   let started = false; // 是否已点「开始播报」
   function setStartBtnRunning(on) {
@@ -663,10 +1198,10 @@
     started = false;
     stoppedFlag = true; // 阻断正在挂起的播报循环
     clearTimeout(timer); timer = null;
-    clearInterval(clockTimer); clockTimer = null;
+    clearTimeout(clockTimer); clockTimer = null;
     document.getElementById('clockOn').checked = false;
     stopStatus();
-    voiceQueue.length = 0; // 清掉后续排队；当前这一句自然读完再安静
+    cancelTasks('content'); cancelTasks('time'); // 清掉后续待播的定时播报和报时；当前这句自然读完再安静
     setStartBtnRunning(false);
     setState('timerState', '已停止');
   };
@@ -686,71 +1221,131 @@
     const tpl = tpls.length ? tpls[Math.floor(Math.random() * tpls.length)] : '现在是{period}{hm}';
     return tpl.replace('{period}', period).replace('{hm}', hm);
   }
-  function clockSpeak(text) {
-    window.api.tts({ text, voice: voiceSel.value, speed: +document.getElementById('speed').value })
-      .then(r => { if (r.ok) playVoice(r.url); });
+  // 报时：入队 TIME 任务（text 可为字符串或函数；函数则播报瞬间取当前时间；严格串行等前面播完）
+  function clockSpeak(textOrFn, opts) {
+    if (engineValue() === 'sovits' && !refAudioValue()) { setState('timerState', '报时失败：请先在 AI 主播页选择已克隆音色', true); return; }
+    const o = opts || {};
+    addTask({ type: 'TIME', tag: 'time', text: textOrFn, engine: o.engine || 'auto', callback: o.callback || (() => {}) });
   }
   function startClock() {
-    clearInterval(clockTimer);
+    clearTimeout(clockTimer);
     const m = Math.max(0.1, parseFloat(document.getElementById('clockM').value) || 2);
     clockNextAt = Date.now() + m * 60000;
-    clockTimer = setInterval(() => { clockNextAt = Date.now() + m * 60000; clockSpeak(timeText()); }, m * 60000);
+    // 报时播完再开始下一次倒计时：先等 m 分钟 → 入队一条报时；
+    // 报时任务真正播完（调度器 callback）→ 才重新排下一次，避免报时没播就白等
+    clockTimer = setTimeout(() => {
+      if (stoppedFlag) return; // 已停止：不再入队报时
+      clockSpeak(() => timeText(), {
+        callback: () => { if (!stoppedFlag) startClock(); } // 这条报时播完 → 重新倒计时
+      });
+    }, m * 60000);
   }
   document.getElementById('clockOn').onchange = (e) => {
     if (!started) return; // 未点「开始播报」只记录勾选，等启动时一并启用
     if (e.target.checked) { startClock(); startStatus(); }
-    else { clearInterval(clockTimer); clockTimer = null; if (!timer) { stopStatus(); setState('timerState', '已停止'); } else startStatus(); }
+    else { clearTimeout(clockTimer); clockTimer = null; if (!timer) { stopStatus(); setState('timerState', '已停止'); } else startStatus(); }
   };
   document.getElementById('clockNow').onclick = () => { const t = timeText(); clockSpeak(t); setState('timerState', '报时：' + t); };
 
-  document.getElementById('pickModel').onclick = async () => {
-    const p = await window.api.pickModelPth();
-    if (p) { document.getElementById('modelPath').value = p; setState('ttsState', '已选择模型（本地引擎预留，装环境后生效）'); }
-  };
-
+  function fmtDur(sec) { if (!sec || sec <= 0) return '--:--'; const m = Math.floor(sec / 60), s = Math.floor(sec % 60); return m + ':' + String(s).padStart(2, '0'); }
+  function fmtSize(b) { if (!b && b !== 0) return ''; if (b < 1024 * 1024) return (b / 1024).toFixed(0) + ' KB'; return (b / 1024 / 1024).toFixed(1) + ' MB'; }
   function renderList() {
     const ul = document.getElementById('playlist');
     ul.innerHTML = '';
     if (!playList.length) { ul.innerHTML = '<div class="empty-tip">暂无音乐，点上方「选择」添加</div>'; return; }
-    playList.forEach((p, i) => {
+    playList.forEach((o, i) => {
       const li = document.createElement('li');
-      li.innerHTML = '<input type="checkbox" value="' + i + '"><span class="name">' + p.split('/').pop() + '</span>';
-      li.onclick = () => { bgmAudio.src = 'file://' + encodeURI(p); bgmAudio.volume = +document.getElementById('bgmVol').value; if (document.getElementById('loopMode').value === 'loop') bgmAudio.loop = true; bgmAudio.play(); setState('bgmState', '播放中：' + p.split('/').pop()); };
+      li.style.display = 'flex';
+      li.style.alignItems = 'center';
+      li.style.gap = '8px';
+      li.innerHTML = '<input type="checkbox" value="' + i + '"><span class="name" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + o.name + '</span><span style="color:#999;font-size:11px;white-space:nowrap;">' + fmtDur(o.duration) + ' · ' + fmtSize(o.size) + '</span>';
+      li.onclick = () => { bgmAudio.src = 'file:///' + encodeURI(String(o.path).replace(/\\/g, '/')); bgmAudio.volume = +document.getElementById('bgmVol').value; if (document.getElementById('loopMode').value === 'loop') bgmAudio.loop = true; try { if (curSinkId && bgmAudio.setSinkId) bgmAudio.setSinkId(curSinkId); } catch (e) {} bgmAudio.play(); setState('bgmState', '播放中：' + o.name); };
       ul.appendChild(li);
     });
   }
+  // 从素材库重新拉全量（含名称/时长/大小）
+  function loadMedia() {
+    window.api.mediaList().then(list => {
+      playList = (list || []).map(x => ({ path: x.path, name: x.name, size: x.size, duration: x.duration }));
+      renderList();
+      if (playList.length) setState('bgmState', '已加载素材库 ' + playList.length + ' 首');
+    }).catch(() => {});
+  }
   document.getElementById('pickMusic').onclick = async () => {
     const p = await window.api.pickAudio();
-    if (p) { playList.push(p); renderList(); setState('bgmState', '已添加：' + p.split('/').pop()); }
+    if (!p) return;
+    // 复制进 media 素材库（重名自动加序号），然后刷新列表
+    const r = await window.api.mediaImport(p);
+    if (!r || !r.ok) { setState('bgmState', '导入失败：' + (r && r.err || '未知错误')); return; }
+    loadMedia();
+    setState('bgmState', '已导入：' + r.name);
   };
-  document.getElementById('removeSel').onclick = () => {
+  document.getElementById('removeSel').onclick = async () => {
     const checked = [...document.querySelectorAll('#playlist input:checked')].map(i => +i.value);
-    checked.sort((a, b) => b - a).forEach(i => playList.splice(i, 1));
+    const delList = checked.sort((a, b) => b - a).map(i => playList.splice(i, 1)[0]);
+    // 同步删除 media 里的本地文件
+    for (const o of delList) { try { await window.api.mediaDelete(o.path); } catch (e) {} }
     renderList();
+    setState('bgmState', '已删除 ' + delList.length + ' 首');
   };
-  document.getElementById('play').onclick = () => { if (bgmAudio.src) { bgmAudio.volume = +document.getElementById('bgmVol').value; bgmAudio.play(); setState('bgmState', '播放中'); } };
+  document.getElementById('play').onclick = () => { if (bgmAudio.src) { bgmAudio.volume = +document.getElementById('bgmVol').value; try { if (curSinkId && bgmAudio.setSinkId) bgmAudio.setSinkId(curSinkId); } catch (e) {} bgmAudio.play(); setState('bgmState', '播放中'); } };
   document.getElementById('pause').onclick = () => { bgmAudio.pause(); setState('bgmState', '已暂停'); };
   document.getElementById('stop').onclick = () => { bgmAudio.pause(); bgmAudio.currentTime = 0; setState('bgmState', '已停止'); };
   document.getElementById('bgmVol').oninput = (e) => { bgmAudio.volume = +e.target.value; };
   document.getElementById('loopMode').onchange = (e) => { bgmAudio.loop = e.target.value === 'loop'; };
 
+  // 启动时默认加载 config/media 下的音乐到播放列表（含名称/时长/大小）
+  loadMedia();
+
   renderList();
+  bindRangeVals();
   // ---- 弹幕自动回复 ----
   let dmList = [];
+  const dmSeenSet = new Map(); // 全局弹幕去重池(key=user+text -> expireAt)：只对短时间内的重复去重，避免长期误杀
+  const DM_TTL = 5 * 1000; // 5 秒：配合 user|text 去重。不同用户发同样内容→都显示；同一用户5秒内发完全相同的→去重；超5秒→显示
+  function dmSeenCheck(dkey){
+    const now = Date.now();
+    const exp = dmSeenSet.get(dkey);
+    if (exp && exp > now) return true; // 仍在 TTL 内 → 判重
+    dmSeenSet.set(dkey, now + DM_TTL); // 新 key 或已过期 → 放行并重新计时
+    if (dmSeenSet.size > 8000) { // 防内存无限增长，清掉已过期的
+      for (const [k, e] of dmSeenSet) if (e <= now) dmSeenSet.delete(k);
+      if (dmSeenSet.size > 8000) dmSeenSet.clear();
+    }
+    return false;
+  }
   function esc(s){ return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
   function dmParse(line){
-    if (/^(.{1,24})来了$/.test(line)) return { user: line.replace(/来了$/, ''), text: '来了', type: 'come' };
-    const m = line.match(/^([^:：]{1,20})[:：]\s*(.+)$/);
-    return m ? { user: m[1], text: m[2], type: 'chat' } : { user: '', text: line, type: 'chat' };
+    // 只解析 user/text，不做事件细分——事件类型由 DOM(bottom_message)+dmClassify 定。
+    // welcome："用户名 来了" → 非贪婪空格切割，空格前是用户名
+    let m = line.match(/^(.{1,24}?)\s+来了$/);
+    if (m) return { user: m[1], text: '来了' };
+    // like/gift/聊天："用户名：内容" → 冒号区分，前面是用户名
+    m = line.match(/^([^:：]{1,20})[:：]\s*(.+)$/);
+    return m ? { user: m[1], text: m[2] } : { user: '', text: line };
+  }
+  // 单条弹幕 HTML（chat 用粉/白，事件消息用灰色系统样式）——增量与全量共用，避免样式漂移
+  function dmItemHtml(d){
+    if (d.type !== 'chat') {
+      return '<div style="margin-bottom:6px;color:#6f74a0;font-size:12px;">'+esc(d.user)+' '+esc(d.text)+'<span style="color:#5a5f85;font-size:11px;margin-left:6px;">'+d.t+'</span></div>';
+    }
+    // 普通弹幕：粉色用户名 + 白色内容
+    const u = '<span style="color:#ff5ca8;font-weight:600;">' + (d.user ? esc(d.user) : '匿名') + '</span><span style="color:#9aa0c8;font-size:11px;margin-left:6px;">' + d.t + '</span>';
+    return '<div style="margin-bottom:8px;word-break:break-all;">'+u+'<div style="color:#e8e9f5;margin-top:2px;">'+esc(d.text)+'</div></div>';
   }
   function renderDanmaku(){
     const box = document.getElementById('dmList');
     document.getElementById('dmCount').textContent = dmList.length;
-    box.innerHTML = dmList.map(d => {
-      if (d.type === 'come') return '<div style="margin-bottom:6px;color:#6f74a0;font-size:12px;">'+esc(d.user)+' 来了 <span style="color:#5a5f85;font-size:11px;margin-left:6px;">'+d.t+'</span></div>';
-      const u = d.user ? '<span style="color:#ff5ca8;font-weight:600;">'+esc(d.user)+'</span><span style="color:#9aa0c8;font-size:11px;margin-left:6px;">'+d.t+'</span>' : '';
-      return '<div style="margin-bottom:8px;word-break:break-all;">'+u+'<div style="color:#e8e9f5;margin-top:2px;">'+esc(d.text)+'</div></div>';
-    }).join('') || '<span style="color:#8a90b8;">暂无弹幕</span>';
+    box.innerHTML = dmList.map(dmItemHtml).join('') || '<span style="color:#8a90b8;">暂无弹幕</span>';
+    if (document.getElementById('dmAutoScroll').checked) box.scrollTop = 0; // 滚动到顶部，新消息在头部
+  }
+  // 增量渲染：只把新的一条插到头部，只删最旧一条，其余不动（弹幕量大时不整块重绘）
+  function dmAppendItem(d){
+    const box = document.getElementById('dmList');
+    document.getElementById('dmCount').textContent = dmList.length;
+    if (box.children.length === 1 && /暂无弹幕/.test(box.firstElementChild.textContent)) box.innerHTML = ''; // 去掉占位
+    box.insertAdjacentHTML('afterbegin', dmItemHtml(d));
+    while (box.children.length > 500) box.lastElementChild.remove(); // 与 dmList 的 500 上限同步
     if (document.getElementById('dmAutoScroll').checked) box.scrollTop = 0;
   }
   function dmLog(msg){
@@ -763,11 +1358,19 @@
   let dmInteractOn = false;          // 开始互动开关
   const dmEvtLast = {};              // 每类事件上次朗读时间（冷却用）
   function dmClassify(line){
-    if (/^(.{1,24})来了$/.test(line)) return { type: 'welcome', name: line.replace(/来了$/, '') };
-    let m = line.match(/^(.{1,24})(送出|赠送|送给你|投喂)(.{1,16})$/);
-    if (m) return { type: 'gift', name: m[1], gift: m[3] };
-    m = line.match(/^(.{1,24})(点赞|点了赞|赞了你)/);
-    if (m) return { type: 'like', name: m[1] };
+    // welcome："用户名 来了" → 非贪婪空格切割，空格前是用户名
+    let m = line.match(/^(.{1,24}?)\s+来了$/);
+    if (m) return { type: 'welcome', name: m[1] };
+    // like/gift/聊天："用户名：内容" → 冒号区分，前面是用户名
+    m = line.match(/^([^:：]{1,20})[:：]\s*(.+)$/);
+    if (!m) return null;
+    const name = m[1];
+    const content = m[2];
+    // 内容含赠送/送出/投喂 → 礼物（礼物名取"赠送"后到句尾）
+    let g = content.match(/(?:送出|赠送|送给你|投喂)(.{1,16})$/);
+    if (g) return { type: 'gift', name, gift: g[1] };
+    // 内容含点赞/点了赞/赞了你 → 点赞
+    if (/点赞|点了赞|赞了你/.test(content)) return { type: 'like', name };
     return null;
   }
   const DM_MASK_NAMES = ['一位观众', '有位朋友', '某个小伙伴', '刚来的朋友', '这位朋友', '直播间的小伙伴', '一位幸运观众', '路过的朋友'];
@@ -783,7 +1386,30 @@
     const gift = g || DM_MASK_GIFTS[Math.floor(Math.random() * DM_MASK_GIFTS.length)];
     return text.replace(/\{昵称\}/g, name).replace(/\{礼物\}/g, gift);
   }
-  function dmPick(src){ const a = (src || '').split('\n').map(x => x.trim()).filter(Boolean); return a.length ? a[Math.floor(Math.random() * a.length)] : ''; }
+  // 模板挑选：对齐"播报随机列表"逻辑——洗牌池一轮内不重复 + 最近 5 条边界防撞（每类模板独立状态）
+  const dmPickState = {}; // key → { pool:[], recent:[] }
+  function dmPick(src, key){
+    const a = (src || '').split('\n').map(x => x.trim()).filter(Boolean);
+    if (!a.length) return '';
+    const st = dmPickState[key] || (dmPickState[key] = { pool: [], recent: [] });
+    // 模板内容变化（增删改）或池取空 → 重建洗牌池
+    if (st.pool.length !== a.length || !st.pool.every((v,i)=>v===a[i])) {
+      st.pool = a.slice();
+      for (let i = st.pool.length - 1; i > 0; i--) { // Fisher-Yates 洗牌
+        const j = Math.floor(Math.random() * (i + 1));
+        [st.pool[i], st.pool[j]] = [st.pool[j], st.pool[i]];
+      }
+      // 边界防撞：把第一条换成不在最近5条里的内容，避免衔接重复
+      if (st.recent.length && st.pool.length > 1) {
+        const idx = st.pool.findIndex(v => !st.recent.includes(v));
+        if (idx > 0) [st.pool[0], st.pool[idx]] = [st.pool[idx], st.pool[0]];
+      }
+    }
+    const line = st.pool.shift();
+    st.recent.push(line);
+    if (st.recent.length > 5) st.recent.shift();
+    return line;
+  }
   function dmInteract(line){
     const ev = dmClassify(line);
     if (!ev) return;
@@ -793,15 +1419,62 @@
     const now = Date.now();
     if (dmEvtLast[ev.type] && now - dmEvtLast[ev.type] < cool) return; // 冷却中
     let tpl = '';
-    if (ev.type === 'welcome') tpl = dmPick(document.getElementById('dmTplWelcome').value);
-    else if (ev.type === 'gift') tpl = dmPick(document.getElementById('dmTplGift').value);
-    else tpl = dmPick(document.getElementById('dmTplLike').value);
+    if (ev.type === 'welcome') tpl = dmPick(document.getElementById('dmTplWelcome').value, 'welcome');
+    else if (ev.type === 'gift') tpl = dmPick(document.getElementById('dmTplGift').value, 'gift');
+    else tpl = dmPick(document.getElementById('dmTplLike').value, 'like');
     if (!tpl) return;
     dmEvtLast[ev.type] = now;
-    speakDanmaku(dmTpl(tpl, ev));
+    speakDanmaku(dmTpl(tpl, ev), 'dm:' + ev.type, { tpl, ev }); // 同类事件(欢迎/礼物/点赞)：带模板入队，合并时不换模板只换变量
   }
   // ---- AI读弹幕答疑 ----
+  // 配置统一存到 config/client-config.json（主进程读写），启动加载、变更即保存
   let aiBusy = false;
+  function syncAICfg(){
+    try {
+      window.api.setAICfg({
+        key: document.getElementById('zhipuKey').value.trim(),
+        base: document.getElementById('zhipuBase').value.trim(),
+        model: document.getElementById('zhipuModel').value.trim(),
+        visionModel: document.getElementById('aiVisionModel').value.trim()
+      });
+    } catch (e) {}
+  }
+  function saveAICfg(){
+    const d = {
+      provider: (document.querySelector('input[name="aiProvider"]:checked') || {}).value || 'zhipu',
+      dskKey: document.getElementById('dskKey').value,
+      dskBase: document.getElementById('dskBase').value,
+      dskModel: document.getElementById('dskModel').value,
+      zhipuKey: document.getElementById('zhipuKey').value,
+      zhipuBase: document.getElementById('zhipuBase').value,
+      zhipuModel: document.getElementById('zhipuModel').value,
+      siliconKey: document.getElementById('siliconKey').value,
+      siliconBase: document.getElementById('siliconBase').value,
+      siliconModel: document.getElementById('siliconModel').value,
+      visionModel: document.getElementById('aiVisionModel').value,
+      aiPrompt: document.getElementById('aiPrompt').value,
+      aiFilter: document.getElementById('aiFilter').value,
+      aiCool: document.getElementById('aiCool').value,
+      aiRetry: document.getElementById('aiRetry').value,
+      aiFallback: document.getElementById('aiFallback').checked,
+      aiFallOrder: document.getElementById('aiFallOrder').value,
+      aiOn: document.getElementById('aiOn').checked,
+      aiVoice: document.getElementById('aiVoice').checked,
+      aiText: document.getElementById('aiText').checked
+    };
+    try { window.api.cfgSave({ aiChat: d }); } catch (e) {}
+    syncAICfg();
+  }
+  // 所有配置控件变更即自动保存到 JSON 文件
+  ['dskKey','dskBase','dskModel','zhipuKey','zhipuBase','zhipuModel','siliconKey','siliconBase','siliconModel','aiVisionModel','aiPrompt','aiFilter','aiCool','aiRetry','aiFallOrder'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', saveAICfg);
+  });
+  ['aiFallback','aiOn','aiVoice','aiText'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', saveAICfg);
+  });
+  document.querySelectorAll('input[name="aiProvider"]').forEach(r => r.addEventListener('change', saveAICfg));
   function aiLog(msg){
     const box = document.getElementById('aiLog');
     const t = new Date().toLocaleTimeString('zh-CN',{hour12:false});
@@ -830,13 +1503,29 @@
       for (const p of order){
         for (let i = 0; i <= retry; i++){
           try {
+            // 画面识别（仅智谱 GLM）：答疑时截取当前屏幕画面，用户消息变多模态 [文字+图片]
+            const useVision = p === 'zhipu' && document.getElementById('aiVisionOn').checked;
+            let model = document.getElementById(p + 'Model').value.trim();
+            let userMsg = { role: 'user', content: question };
+            if (useVision) {
+              model = document.getElementById('aiVisionModel').value.trim() || model;
+              try {
+                const cap = await window.api.screenCapture();
+                if (cap && cap.ok && cap.dataUrl) {
+                  userMsg = { role: 'user', content: [
+                    { type: 'text', text: question },
+                    { type: 'image_url', image_url: { url: cap.dataUrl } }
+                  ] };
+                }
+              } catch (e) { /* 截屏失败 → 降级纯文本提问 */ }
+            }
             const r = await window.api.chatAI({
               apiKey: document.getElementById(p + 'Key').value.trim(),
               baseUrl: document.getElementById(p + 'Base').value.trim(),
-              model: document.getElementById(p + 'Model').value.trim(),
+              model,
               messages: [
                 { role: 'system', content: sys },
-                { role: 'user', content: question }
+                userMsg
               ]
             });
             if (r && r.ok) { setAIStatus('ok'); return (r.text || '').trim(); }
@@ -853,48 +1542,168 @@
   }
   function aiFilterArr(){ return (document.getElementById('aiFilter').value || '').split(/[;；]/).map(s => s.trim()).filter(Boolean); }
   let aiLast = 0;
-  function aiTrigger(line){
+  function aiTrigger(ev){
     if (!document.getElementById('aiOn').checked) return; // 未启用
-    if (dmClassify(line)) return; // 欢迎/礼物/点赞事件不触发AI
-    const kw = aiFilterArr();
-    if (kw.length && kw.some(k => line.includes(k))) return; // 命中过滤关键词
+    const question = (ev && ev.d && ev.d.text) || (ev && ev.raw) || ''; // 提问用聊天内容（已去掉用户名）
+    if (!question) return;
+    if (dmClassify(question)) return; // 欢迎/礼物/点赞事件不触发AI
+    if (dmContentBlocked(question)) return; // 内容安全过滤：命中敏感/违规/广告等不触发AI答疑
     const now = Date.now();
     const cool = Math.max(0, +document.getElementById('aiCool').value || 0) * 1000;
     if (aiLast && now - aiLast < cool) return; // 冷却中
     aiLast = now;
-    aiLog('提问：' + line);
-    aiAsk(line).then(t => {
+    aiLog('提问：' + question);
+    aiAsk(question).then(t => {
       if (t == null) return;
       aiLog('AI：' + t);
-      if (document.getElementById('aiVoice').checked) speakDanmaku(t);
+      if (document.getElementById('aiVoice').checked) speakDanmaku(t, 'ai'); // AI答疑独立 tag，不与其他事件合并
     });
   }
-  function speakDanmaku(line){
-    window.api.tts({ text: line, voice: document.getElementById('voiceSel').value, speed: 1 }).then(r => { if (r.ok) playVoice(r.url, 'danmaku'); });
+  // 弹幕/AI/事件语音：入队 EVENT 任务（同类 tag 自动合并覆盖，防积压；严格串行）
+  // 朗读前清洗：TTS(GPT-SoVITS)对 emoji/特殊 Unicode/颜文字支持差，替换为可读文本或去掉，避免读不出。
+  function cleanForTTS(line){
+    let s = String(line || '');
+    // 常见礼物/互动 emoji 词 → 中文
+    const map = {
+      '🎒':'', '🎈':'气球', '🎁':'礼物', '💝':'礼物', '❤':'爱心', '💕':'爱心',
+      '🌹':'花', '💐':'花', '🧧':'红包', '👑':'皇冠', '🍭':'糖果', '🌈':'彩虹',
+      '🎉':'庆祝', '🎊':'庆祝', '💯':'满分', '👍':'点赞', '🙏':'感谢', '😍':'喜欢',
+      '🥰':'喜欢', '😊':'微笑', '✨':'', '⭐':'', '🌟':'', '🔥':'火', '💪':'加油'
+    };
+    // 先替换已知 emoji
+    for (const k in map) s = s.split(k).join(map[k]);
+    // 去掉仍存的 emoji 与杂项符号（含颜文字、斜杠组合、特殊 unicode 私用区等）
+    s = s
+      .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}\u{2B50}\u{2705}\u{2764}\u{1F1E6}-\u{1F1FF}]/gu, '') // emoji 块
+      .replace(/[•··᷅᷄᷆᷇\]+_=|\\/@#$%^&*]+/g, ' ')          // 常用特殊符号
+      .replace(/[（(【[<〔][^）)】]>〕]*[）)】]>〕]/g, '')        // 括号内容（如 \୭\ 之类）
+      .replace(/[^\u4e00-\u9fa5A-Za-z0-9，。！？、；：""''·\- ]/g, ''); // 只留中文/英文/数字/常用标点
+    // 合并空白
+    s = s.replace(/\s+/g, ' ').trim();
+    return s;
+  }
+  // 内容安全过滤：命中敏感/违规/广告/联系方式等内容返回 true（朗读与 AI 答疑共用）。
+  // 内置基础规则 + 用户 aiFilter 自定义黑名单关键词，命中即拦截。
+  function dmContentBlocked(text){
+    const s = String(text || '');
+    if (!s) return false;
+    // 1) 联系方式/URL/账号：微信号、手机号、QQ、网址、邮箱
+    if (/(vx|weixin|wechat|wxid|微信|➕|\+?v)[\s:：]*[a-zA-Z0-9_]{4,}/i.test(s)) return true;
+    if (/1[3-9]\d{9}/.test(s)) return true;                       // 手机号
+    if (/\b[1-9]\d{4,10}\b/.test(s)) return true;                 // 疑似QQ号（5-11位纯数字）
+    if (/https?:\/\/|www\.|\.com\b|\.cn\b|\.top\b|\.xyz\b|\.vip\b|\.cc\b|\.me\b|\.shop\b|\.site\b/i.test(s)) return true; // 网址/域名
+    if (/[\w.+-]+@[\w-]+\.\w+/.test(s)) return true;              // 邮箱
+    if (/0(10|2[0-9]|3[0-9]|4[0-9]|5[0-9]|6[0-9]|7[0-9]|8[0-9]|9[0-9])\d{7,8}/.test(s)) return true; // 固定电话
+    // 2) 站外导流/竞品平台（抖音重点管控，导流站外最重）
+    const extKw = ['快手','b站','bilibili','bilibili','哔哩哔哩','淘宝','天猫','拼多多','闲鱼','京东','苏宁','唯品会','微博','微店','抖音号','公众号','视频号','小红书','知乎','虎牙','斗鱼','yy','映客','花椒','易信','钉钉','line','telegram','ins','youtube','油管','discord'];
+    if (extKw.some(k => s.toLowerCase().includes(k))) return true;
+    // 3) 广告/引流/交易词
+    const adKw = ['加微信','加v','扫码','二维码','群号','进群','拼单','刷单','代购','优惠券','返现','红包群','加我','私信我','关注我公众号','下载app','点击链接','免费领取','领红包','充值','变现','兼职','招代理','招生','卖号','租号','出号','收号','联系方式','联系我','私聊','线下交易','货到付款','先款','先货','定金','尾款','拍下','下单链接','秒杀','砍价','拼团'];
+    if (adKw.some(k => s.includes(k))) return true;
+    // 4) 医疗健康违规：药品/保健品功效、医美、诊疗
+    const medKw = ['药品','处方','治疗','治愈','根治','药到病除','保健品','滋补','壮阳','补肾','减肥','瘦身','祛痘','祛斑','美白','医美','整容','隆胸','植发','丰胸','增高','近视矫正','抗癌','降血压','降血糖','三高','特效药','祖传秘方','偏方','就诊','医院','门诊'];
+    if (medKw.some(k => s.includes(k))) return true;
+    // 5) 金融违规：荐股、贷款、理财、稳赚
+    const finKw = ['荐股','股票','炒股','牛股','涨停','操盘','内幕','贷款','借贷','网贷','网贷','放款','利率','理财','投资','稳赚','保本','高收益','分红','众筹','比特币','虚拟币','币圈','炒币','挖矿','基金推荐','开户','佣金'];
+    if (finKw.some(k => s.includes(k))) return true;
+    // 6) 未成年人相关（平台重点管控）
+    const minorKw = ['未成年','未成年人','小孩','孩子','学生','青少年','小学生','初中生','高中生','几岁','多大','真实年龄','年龄'];
+    if (minorKw.some(k => s.includes(k))) return true;
+    // 7) 赌博博彩
+    const betKw = ['赌博','博彩','彩票','赌球','赌马','六合彩','百家乐','老虎机','押注','下注','倍投','庄家','盘口','开奖'];
+    if (betKw.some(k => s.includes(k))) return true;
+    // 8) 违规物品交易
+    const goodsKw = ['烟','香烟','电子烟','酒','茅台','枪支','刀具','管制','弹药','爆炸物','毒品','冰毒','摇头丸','大麻','迷药','假币','发票','代开发票','走私','赃物','账号交易','游戏币','代练'];
+    if (goodsKw.some(k => s.includes(k))) return true;
+    // 9) 敏感/引战/辱骂（基础词库，命中即不朗读、不答疑）
+    const badKw = ['傻逼','煞笔','脑残','废物','垃圾玩意','去死','操你','妈的','草你','嫖','赌','毒','刷屏举报','举报你','裸','色情','约炮','上床','卖淫','嫖娼','滚','白痴','蠢货','贱','狗东西','废物点心','神经病','恶心'];
+    if (badKw.some(k => s.includes(k))) return true;
+    // 10) 用户自定义黑名单关键词（aiFilter）
+    const custom = (document.getElementById('aiFilter').value || '').split(/[;；]/).map(x => x.trim()).filter(Boolean);
+    if (custom.length && custom.some(k => s.includes(k))) return true;
+    return false;
+  }
+  // tplData = {tpl: 模板句, ev: 变量}。带模板时：
+  //   · 队列已有同类待播任务 → 不换模板只换变量（保留原模板句，更新最新事件变量）
+  //   · 否则正常入队，播报瞬间才按模板句渲染（模板句不重新挑选，洗牌池不被消费）
+  function speakDanmaku(line, tag, tplData) {
+    if (!line) return;
+    const t = tag || 'dm';
+    const text = cleanForTTS(line);
+    if (dmContentBlocked(line)) { dmLog('[内容过滤] 已拦截朗读：' + String(line).slice(0, 24)); return; } // 命中敏感内容不朗读
+    if (tplData && tplData.tpl) {
+      const found = taskQueue.find(x => x.type === 'EVENT' && x.tag === t && x.tpl);
+      if (found) { // 合并：模板句保留，只换变量，渲染文本同步为最新（队列显示与播报一致）
+        found.tplV = tplData.ev;
+        found.text = cleanForTTS(dmTpl(found.tpl, found.tplV));
+        found.timestamp = Date.now();
+        triggerScheduler();
+        return;
+      }
+    }
+    addTask({ type: 'EVENT', tag: t, text, tpl: (tplData && tplData.tpl) || null, tplV: (tplData && tplData.ev) || null });
+  }
+  // ================= 弹幕统一事件管道（方案A：只语音朗读，不发弹幕到直播间） =================
+  // 现有 addDanmaku(line) 只做两件事：把原始行适配成统一事件，再交给四段式管道。
+  // 去重→展示→互动→朗读 四个分支互相独立，任一失败不影响其他。
+  let dmEvtSeq = 0; // eventId 辅助序号（无真实 msgId，用内容+序号兜底防误杀）
+  // 适配器：原始消息 m = {t: 文本, type: 'chat'|'event'(DOM判断)} → 单对象
+  function adaptDmLine(m){
+    if (!m || !m.t || !m.t.trim()) return null;
+    const line = m.t;
+    const d = { t: new Date().toLocaleTimeString('zh-CN',{hour12:false}), ...dmParse(line) };
+    // type：聊天(DOM不含 bottom_message)固定 'chat'；事件消息(DOM含 bottom_message)按内容细分 welcome/gift/like。
+    d.type = (m.type === 'event')
+      ? ((dmClassify(line) || {}).type || 'welcome')
+      : 'chat';
+    const eventId = (d.user || '') + '|' + (d.text || '') + '|' + (++dmEvtSeq);
+    return { eventId, type: d.type, d, raw: line };
+  }
+  // 管道：dispatch(ev) → 1去重 → 2展示 → 3互动 → 4朗读
+  function dispatchDmEvent(ev){
+    // 1) 去重：key=用户名|正文。注入层已保证只抓完整条目（用户名稳定），
+    //    · 不同用户发同样内容 → key 不同 → 都显示
+    //    · 同一用户 5 秒内发完全相同 → 去重
+    //    · 同一用户间隔超 5 秒 → 显示
+    const dkey = ((ev.d.user || '') + '|' + (ev.d.text || '')).replace(/\s+/g, ' ').trim();
+    if (dkey && dmSeenCheck(dkey)) { dmLog('[去重] 跳过重复弹幕：' + ev.raw); return; }
+    // 2) 展示分支：受"过滤事件消息"开关，选中则 welcome/gift/like 不进列表/不读原文/不走AI
+    const filterEvent = document.getElementById('dmIFilter').checked;
+    const showInList = !(filterEvent && ev.type !== 'chat');
+    // 3) 互动分支：事件消息且开启"弹幕语音互动"→ 按模板朗读（不受列表过滤影响）
+    if (dmInteractOn && ev.type !== 'chat') dmInteract(ev.raw);
+    // 4) 朗读分支：chat 且开启"自动读弹幕"→ 读原文
+    if (showInList && dmAutoReadOn && ev.type === 'chat') speakDanmaku(ev.raw);
+    // 展示落库（过滤事件消息时跳过的就不进列表）
+    if (showInList) {
+      aiTrigger(ev); // AI读弹幕答疑（提问用聊天内容，去掉用户名）
+      dmList.unshift(ev.d);   // 新消息加头部 → 新在最上，向下滚看旧
+      if (dmList.length > 500) dmList.pop();
+      dmAppendItem(ev.d);     // 增量渲染：只加这一条，不整块重绘
+    }
   }
   function addDanmaku(line){
-    if (!line || !line.trim()) return;
-    const d = { t: new Date().toLocaleTimeString('zh-CN',{hour12:false}), ...dmParse(line) };
-    if (dmInteractOn) dmInteract(line); // 事件类按模板朗读（带冷却），不受列表过滤影响
-    if (document.getElementById('dmIFilter').checked && d.type === 'come') return; // 过滤系统消息：不进列表、不读原文、不走AI
-    aiTrigger(line); // AI读弹幕答疑（在系统消息过滤之后，过滤了就不再走AI）
-    dmList.unshift(d);
-    if (dmList.length > 500) dmList.pop();
-    renderDanmaku();
-    if (dmAutoReadOn && d.type !== 'come' && !(dmInteractOn && dmClassify(line))) speakDanmaku(line); // 普通弹幕读原文
+    const ev = adaptDmLine(line);
+    if (ev) dispatchDmEvent(ev);
   }
   document.getElementById('dmConnect').onclick = async () => {
     const url = document.getElementById('dmUrl').value.trim();
     if (!url) { setState('dmState', '请输入直播间链接', true); return; }
-    dmList = []; renderDanmaku(); // 重新连接时清空弹幕
+    dmList = []; dmSeenSet.clear(); renderDanmaku(); // 重新连接时清空弹幕与去重池
+    const btn = document.getElementById('dmConnect');
+    btn.disabled = true; btn.textContent = '正在连接中...';
     dmLog('发起连接：' + url);
-    setState('dmState', '正在连接…');
-    await window.api.connectDanmaku(url);
+    setState('dmState', '正在连接...');
+    try {
+      await window.api.connectDanmaku(url);
+    } finally {
+      btn.disabled = false; btn.textContent = '连接直播间';
+    }
   };
   document.getElementById('dmDisconnect').onclick = async () => { await window.api.disconnectDanmaku(); setState('dmState', '已断开'); dmLog('已断开连接'); };
   document.getElementById('dmShowLogin').onclick = () => window.api.showLoginWin();
   document.getElementById('dmHide').onclick = () => window.api.hideLoginWin();
-  document.getElementById('dmClear').onclick = () => { dmList = []; renderDanmaku(); };
+  document.getElementById('dmClear').onclick = () => { dmList = []; dmSeenSet.clear(); renderDanmaku(); };
   document.getElementById('dmRefresh').onclick = () => renderDanmaku();
   document.getElementById('dmStart').onclick = () => {
     dmInteractOn = !dmInteractOn;
@@ -904,7 +1713,7 @@
   };
   document.getElementById('dmTest').onclick = () => {
     const tpl = dmPick(document.getElementById('dmTplWelcome').value) || '欢迎{昵称}来到直播间';
-    speakDanmaku(dmTpl(tpl, { name: '测试用户', gift: '' }));
+    speakDanmaku(dmTpl(tpl, { name: '测试用户', gift: '' }), 'dm:test');
     dmLog('测试朗读欢迎语');
   };
   document.getElementById('aiTest').onclick = async () => {
@@ -917,50 +1726,34 @@
     if (t == null) { document.getElementById('aiTestOut').textContent = st + '，调用失败，请查看上方 AI 答疑日志'; return; }
     document.getElementById('aiTestOut').textContent = st + '\n' + t;
     aiLog('AI：' + t);
-    if (document.getElementById('aiVoice').checked) speakDanmaku(t);
+    if (document.getElementById('aiVoice').checked) speakDanmaku(t, 'ai');
     aiLog('测试完成');
   };
   window.api.onDanmaku(line => addDanmaku(line));
   let dmAutoReadOn = false; // 取消后清掉已排队的弹幕朗读，正在播的自然读完
   document.getElementById('dmAutoRead').onchange = (e) => {
     dmAutoReadOn = e.target.checked;
-    if (!e.target.checked) {
-      for (let i = voiceQueue.length - 1; i >= 0; i--) if (voiceQueue[i].tag === 'danmaku') voiceQueue.splice(i, 1);
-    }
+    if (!e.target.checked) cancelTasks('dm'); // 清掉队列中待播的弹幕原文朗读
   };
+  // 过滤规则弹窗：打开/关闭
+  // 过滤规则：点击打开独立可移动窗口（frame:false 无边框，标题栏拖动）
+  document.getElementById('dmFilterRule').onclick = () => { window.api.openFilterRule(); };
+  // 语音队列：点击打开独立窗口（队列快照由上方 885 行定时同步）
+  document.getElementById('openVoiceQueue').onclick = () => { window.api.openVoiceQueue(); };
+  // 语音队列窗口点击「清空语音」→ 只清空等待队列，正在播报的继续播完
+  window.api.onVoiceQueueClear(() => { clearVoiceQueue(); });
+  window.api.onVoiceQueuePause((paused) => { paused ? pauseVoice() : resumeVoice(); });
   window.api.onDanmakuStatus(m => { dmLog(m); setState('dmState', m); });
   dmLog('未连接，等待发起连接…');
 
-  // ---- AI 配置持久化（localStorage，重启不丢失）----
-  function aiPersist(){
+  // ---- AI 配置：统一存到 config/client-config.json（localStorage 已废弃）----
+  function aiPersist(){ saveAICfg(); } // 兼容旧调用：点测试等场景也落盘
+  async function aiLoad(){
     try {
-      const d = {
-        dskKey: document.getElementById('dskKey').value,
-        dskBase: document.getElementById('dskBase').value,
-        dskModel: document.getElementById('dskModel').value,
-        zhipuKey: document.getElementById('zhipuKey').value,
-        zhipuBase: document.getElementById('zhipuBase').value,
-        zhipuModel: document.getElementById('zhipuModel').value,
-        siliconKey: document.getElementById('siliconKey').value,
-        siliconBase: document.getElementById('siliconBase').value,
-        siliconModel: document.getElementById('siliconModel').value,
-        aiPrompt: document.getElementById('aiPrompt').value,
-        aiFilter: document.getElementById('aiFilter').value,
-        aiCool: document.getElementById('aiCool').value,
-        aiRetry: document.getElementById('aiRetry').value,
-        aiFallback: document.getElementById('aiFallback').checked,
-        aiFallOrder: document.getElementById('aiFallOrder').value,
-        aiOn: document.getElementById('aiOn').checked,
-        aiVoice: document.getElementById('aiVoice').checked,
-        aiText: document.getElementById('aiText').checked
-      };
-      localStorage.setItem('aiCfg', JSON.stringify(d));
-    } catch(e){}
-  }
-  function aiLoad(){
-    try {
-      const d = JSON.parse(localStorage.getItem('aiCfg') || '{}');
+      const cfg = await window.api.cfgLoad();
+      const d = (cfg && cfg.aiChat) || {};
       ['dskKey','dskBase','dskModel','zhipuKey','zhipuBase','zhipuModel','siliconKey','siliconBase','siliconModel'].forEach(k => { if (d[k] !== undefined) document.getElementById(k).value = d[k]; });
+      if (d.provider) { const r = document.querySelector('input[name="aiProvider"][value="' + d.provider + '"]'); if (r) r.checked = true; }
       if (d.aiPrompt !== undefined) document.getElementById('aiPrompt').value = d.aiPrompt;
       if (d.aiFilter !== undefined) document.getElementById('aiFilter').value = d.aiFilter;
       if (d.aiCool !== undefined) document.getElementById('aiCool').value = d.aiCool;
@@ -973,8 +1766,166 @@
     } catch(e){}
   }
   document.getElementById('aiTest').addEventListener('click', aiPersist);
-  document.querySelectorAll('input[name="aiProvider"]').forEach(r => r.addEventListener('change', aiPersist));
-  aiLoad();
+  aiLoad().then(() => syncAICfg()); // JSON 配置恢复后同步智谱 Key/Base/Model 给主进程（程序化赋值不触发 input 事件，必须在此补一次）
+
+  // ---------- 声音克隆（音色库） ----------
+  let vcAudioEl = null;
+  function vcState(msg, err) {
+    const el = document.getElementById('vcState');
+    el.textContent = msg;
+    el.className = 'state' + (err ? ' err' : '');
+  }
+  async function loadVoices() {
+    try {
+      const list = await window.api.listVoices();
+      const box = document.getElementById('vcList');
+      document.getElementById('vcCount').textContent = '共 ' + (list ? list.length : 0) + ' 个音色';
+      if (!list || !list.length) { box.innerHTML = '<div class="empty-tip">还没有音色，先在左侧克隆一个</div>'; return; }
+      box.innerHTML = list.map(v => `
+        <div style="background:#0f1020;border:1px solid #2a2d52;border-radius:12px;padding:14px 16px;margin-bottom:10px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;">
+            <strong style="font-size:14px;">${v.name}</strong>
+            <span style="font-size:11px;color:#9aa0c8;">${new Date(v.createdAt).toLocaleString().split(' ')[0]}</span>
+          </div>
+          <div style="font-size:11px;color:#9aa0c8;margin:6px 0 10px;word-break:break-all;">${v.promptText || '（无参考文本）'}</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="dmb dmb-g" data-act="use" data-id="${v.id}">▶ 选用此音色</button>
+            <button class="dmb dmb-b" data-act="listen" data-id="${v.id}">试听</button>
+            <button class="dmb dmb-b" data-act="stop" data-id="${v.id}">■ 停止</button>
+            <button class="dmb dmb-y" data-act="edit" data-id="${v.id}">编辑</button>
+            <button class="dmb dmb-r" data-act="del" data-id="${v.id}">删除</button>
+          </div>
+        </div>`).join('');
+      box.querySelectorAll('button[data-act]').forEach(btn => btn.onclick = async () => {
+        const act = btn.dataset.act, id = btn.dataset.id;
+        const v = list.find(x => x.id === id);
+        if (!v) return;
+        if (act === 'use') {
+          // 切到本地引擎，并在 AI 主播页"已克隆音色"下拉选中该音色（会自动预热）
+          const es = document.getElementById('engineSel');
+          if (es.value !== 'sovits') { es.value = 'sovits'; setEngineUI(true); }
+          const sel = document.getElementById('voiceLibSel');
+          if (sel) { sel.value = v.id; sel.dispatchEvent(new Event('change')); }
+          vcState('✅ 已选用「' + v.name + '」，回 AI 主播页即可朗读', false);
+        } else if (act === 'listen') {
+          if (vcAudioEl) { vcAudioEl.pause(); }
+          vcAudioEl = new Audio('file:///' + encodeURI(v.refAudio.replace(/\\/g, '/')));
+          vcAudioEl.play().catch(() => vcState('试听失败：无法播放该文件', true));
+        } else if (act === 'stop') {
+          if (vcAudioEl) { vcAudioEl.pause(); vcAudioEl = null; }
+        } else if (act === 'edit') {
+          openEditVoice(v);
+        } else if (act === 'del') {
+          if (!confirm('删除音色「' + v.name + '」？')) return;
+          const r = await window.api.deleteVoice(id);
+          if (r.ok) loadVoices();
+        }
+      });
+    } catch (e) { vcState('加载音色库失败', true); }
+  }
+  // ---- 声音设备管理：枚举输出设备 + 定向到虚拟声卡（setSinkId）----
+  let curSinkId = null;               // 当前选择的音频输出设备 id（null=系统默认）
+  // 应用输出设备到"语音播放"两条出口（云端 voiceAudio / 本地流式 AudioContext）
+  async function applySinkId() {
+    if (!curSinkId) return;           // 默认设备无需设置
+    try { if (voiceAudio && voiceAudio.setSinkId) await voiceAudio.setSinkId(curSinkId); } catch (e) {}
+    try { if (sCtx && sCtx.setSinkId) await sCtx.setSinkId(curSinkId); } catch (e) {}
+    try { if (bgmAudio && bgmAudio.setSinkId) await bgmAudio.setSinkId(curSinkId); } catch (e) {} // 背景音乐同样跟随所选输出设备
+  }
+  async function loadDevices() {
+    const state = document.getElementById('deviceState');
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) { state.textContent = '当前环境不支持枚举音频设备'; state.className='state err'; return; }
+      const devs = await navigator.mediaDevices.enumerateDevices();
+      const outs = devs.filter(d => d.kind === 'audiooutput');
+      const sel = document.getElementById('deviceOut');
+      sel.innerHTML = '<option value="default">系统默认扬声器</option>' +
+        outs.map(d => '<option value="' + d.deviceId + '">' + (d.label || '音频设备') + '</option>').join('');
+      // 回显已保存的选择
+      const saved = localStorage.getItem('voiceSinkId');
+      if (saved && outs.some(d => d.deviceId === saved)) { sel.value = saved; curSinkId = saved; }
+      else { sel.value = 'default'; curSinkId = null; }
+      state.textContent = '已发现 ' + outs.length + ' 个输出设备，选择后点「保存」即可生效';
+      state.className = '';
+    } catch (e) { state.textContent = '枚举设备失败：' + e.message; state.className='state err'; }
+  }
+  // 选择设备即时预览（不持久化）
+  document.getElementById('deviceOut').addEventListener('change', (e) => {
+    curSinkId = e.target.value === 'default' ? null : e.target.value;
+    applySinkId();
+  });
+  document.getElementById('deviceRefresh').onclick = loadDevices;
+  document.getElementById('deviceGuide').onclick = () => window.api.openDeviceGuide();
+  document.getElementById('deviceOpenDir').onclick = () => window.api.openDeviceDir();
+  document.getElementById('deviceApply').onclick = () => {
+    localStorage.setItem('voiceSinkId', curSinkId || '');
+    const state = document.getElementById('deviceState');
+    state.textContent = curSinkId ? '✅ 已保存并应用：AI 语音将输出到所选设备' : '✅ 已保存：使用系统默认扬声器';
+    state.className = '';
+  };
+  // 每次新建流式 AudioContext 或播放云端音频时应用已选输出设备
+  window.__applySink = applySinkId;
+  // ---- 编辑音色 ----
+  let vcEditId = null;
+  function openEditVoice(v) {
+    vcEditId = v.id;
+    document.getElementById('vcEditName').value = v.name || '';
+    document.getElementById('vcEditText').value = v.promptText || '';
+    document.getElementById('vcEditAudio').value = '';
+    document.getElementById('vcEditModal').style.display = 'flex';
+  }
+  function closeEditVoice() {
+    vcEditId = null;
+    document.getElementById('vcEditModal').style.display = 'none';
+  }
+  document.getElementById('vcEditCancel').onclick = closeEditVoice;
+  document.getElementById('vcEditPick').onclick = async () => {
+    const p = await window.api.pickAudio();
+    if (p) { document.getElementById('vcEditAudio').value = p; }
+  };
+  document.getElementById('vcEditSave').onclick = async () => {
+    if (!vcEditId) return;
+    const name = document.getElementById('vcEditName').value.trim();
+    const text = document.getElementById('vcEditText').value.trim();
+    const audio = document.getElementById('vcEditAudio').value.trim();
+    if (!name) { vcState('请填写音色名称', true); return; }
+    vcState('正在保存…');
+    const r = await window.api.updateVoice(vcEditId, { name, promptText: text, refAudio: audio || undefined });
+    if (r.ok) {
+      vcState('✅ 已保存音色「' + name + '」', false);
+      closeEditVoice();
+      loadVoices();
+    } else { vcState(r.err || '保存失败', true); }
+  };
+  // 点击遮罩关闭
+  document.getElementById('vcEditModal').addEventListener('click', (e) => { if (e.target.id === 'vcEditModal') closeEditVoice(); });
+
+  document.getElementById('vcPickAudio').onclick = async () => {
+    const p = await window.api.pickAudio();
+    if (p) { document.getElementById('vcAudio').value = p; vcState('已选择参考音频'); }
+  };
+  document.getElementById('vcAdd').onclick = async () => {
+    const name = document.getElementById('vcName').value.trim();
+    const text = document.getElementById('vcText').value.trim();
+    const audio = document.getElementById('vcAudio').value.trim();
+    if (!name || !audio) { vcState('请填写音色名称并选择参考音频', true); return; }
+    vcState('正在存入音色库…');
+    const r = await window.api.addVoice({ name, promptText: text, refAudio: audio });
+    if (r.ok) {
+      vcState('✅ 已克隆「' + name + '」并存入音色库', false);
+      document.getElementById('vcName').value = '';
+      document.getElementById('vcText').value = '';
+      document.getElementById('vcAudio').value = '';
+      loadVoices();
+    } else { vcState(r.err || '失败', true); }
+  };
+  document.getElementById('vcClear').onclick = () => {
+    document.getElementById('vcName').value = '';
+    document.getElementById('vcText').value = '';
+    document.getElementById('vcAudio').value = '';
+    vcState('');
+  };
+  document.getElementById('vcRefresh').onclick = loadVoices;
 </script>
 </body>
 </html>

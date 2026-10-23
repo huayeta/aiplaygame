@@ -16,3 +16,9 @@ npm-debug.log*
 # 本地临时/验证产物
 test/*.png
 /tmp/
+
+# 客户端本地配置（含 API Key、游戏库、自动玩配置等，不入库）
+config/
+
+# 本地软件安装包（体积大，不入库）
+src/software/

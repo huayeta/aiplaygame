@@ -43,17 +43,31 @@
   <div class="cols">
     <!-- 左：文本朗读 & 定时播报 -->
     <div class="col">
-      <h2>🎙 文本朗读 & 定时播报 <span class="chip">edge-tts 免费云端</span></h2>
-      <p class="sub">选声音 → 输入文案朗读；可定时自动随机播报</p>
+      <h2>🎙 文本朗读 & 定时播报 <span class="chip">edge-tts 免费云端 / 本地 GPT-SoVITS</span></h2>
+      <p class="sub">选引擎和音色 → 输入文案朗读；可定时自动随机播报</p>
 
       <div class="field">
+        <span class="label">语音引擎</span>
+        <select id="engineSel">
+          <option value="edge">云端微软晓晓（edge-tts）</option>
+          <option value="sovits">本地 GPT-SoVITS（.pth）</option>
+        </select>
+      </div>
+
+      <div class="field" id="edgeFields">
         <span class="label">声音（音色）</span>
         <select id="voiceSel"></select>
       </div>
 
+      <div class="field pth-row" id="sovitsFields" style="display:none;">
+        <span class="label" style="flex:none;margin:0;">参考音频</span>
+        <input id="refAudioPath" readonly placeholder="选择 5-10 秒人声音频（决定音色）">
+        <button class="ghost" id="pickRefAudio" style="white-space:nowrap;">浏览</button>
+      </div>
+
       <div class="field pth-row">
         <span class="label" style="flex:none;margin:0;">.pth 模型</span>
-        <input id="modelPath" readonly placeholder="（预留）选择本地 .pth 声音模型，环境装好后可用">
+        <input id="modelPath" readonly placeholder="选择本地 .pth/ckpt 声音模型（可选）">
         <button class="ghost" id="pickModel" style="white-space:nowrap;">浏览</button>
       </div>
 
@@ -163,11 +177,31 @@
 
   const state = (id, msg, err) => { const el = document.getElementById(id); el.textContent = msg; el.className = 'state' + (err ? ' err' : ''); };
 
+  // ---- 引擎切换 ----
+  function engineValue() { return document.getElementById('engineSel').value; }
+  function refAudioValue() { return document.getElementById('refAudioPath').value.trim(); }
+  document.getElementById('engineSel').onchange = (e) => {
+    const sovits = e.target.value === 'sovits';
+    document.getElementById('sovitsFields').style.display = sovits ? 'flex' : 'none';
+    document.getElementById('edgeFields').style.display = sovits ? 'none' : 'block';
+  };
+  document.getElementById('pickRefAudio').onclick = async () => {
+    const p = await window.api.pickRefAudio();
+    if (p) { document.getElementById('refAudioPath').value = p; state('ttsState', '已选参考音频（本地音色）'); }
+  };
+
   // ---- 文本朗读 ----
   async function speak(text) {
     if (!text) { state('ttsState', '请先输入文案', true); return; }
+    if (engineValue() === 'sovits' && !refAudioValue()) { state('ttsState', '请先选择参考音频（音色）', true); return; }
     state('ttsState', '合成中…');
-    const r = await window.api.tts({ text, voice: voiceSel.value, speed: +document.getElementById('speed').value });
+    const r = await window.api.tts({
+      text,
+      engine: engineValue(),
+      voice: voiceSel.value,
+      refAudio: refAudioValue(),
+      speed: +document.getElementById('speed').value
+    });
     if (!r.ok) { state('ttsState', '合成失败：' + r.err, true); return; }
     voiceAudio.volume = +document.getElementById('ttsVol').value;
     voiceAudio.src = r.url;
@@ -194,7 +228,7 @@
     if (!line) { state('timerState', '播报列表为空，请先填写', true); return; }
     const duck = document.getElementById('duck').value === 'low';
     if (duck && bgmAudio.src) bgmAudio.volume = +document.getElementById('bgmVol').value * 0.15;
-    const r = await window.api.tts({ text: line, voice: voiceSel.value, speed: +document.getElementById('speed').value });
+    const r = await window.api.tts({ text: line, engine: engineValue(), voice: voiceSel.value, refAudio: refAudioValue(), speed: +document.getElementById('speed').value });
     if (!r.ok) return;
     voiceAudio.volume = +document.getElementById('ttsVol').value;
     voiceAudio.src = r.url;
@@ -216,10 +250,10 @@
   document.getElementById('timerOn').onchange = (e) => { if (e.target.checked) schedule(); else { clearTimeout(timer); timer = null; state('timerState', '已停止'); } };
   document.getElementById('preview').onclick = () => { const line = pickLine(); if (line) speak(line); else state('timerState', '播报列表为空', true); };
 
-  // ---- .pth 模型（预留）----
+  // ---- .pth 模型（本地引擎）----
   document.getElementById('pickModel').onclick = async () => {
     const p = await window.api.pickModelPth();
-    if (p) { document.getElementById('modelPath').value = p; state('ttsState', '已选择模型（本地引擎预留，装环境后生效）'); }
+    if (p) { document.getElementById('modelPath').value = p; document.getElementById('engineSel').value = 'sovits'; document.getElementById('sovitsFields').style.display = 'flex'; document.getElementById('edgeFields').style.display = 'none'; state('ttsState', '已选模型：' + p.split(/[\\/]/).pop() + '（本地引擎，需同时选参考音频）'); }
   };
 
   // ---- 背景音乐 ----

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>弹幕过滤规则</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Microsoft YaHei', system-ui, sans-serif; background: #171830; color: #e7e9f7; }
+  .wrap { padding: 16px 18px; max-height: 100vh; overflow-y: auto; }
+  .intro { font-size: 12.5px; color: #c3c7e8; margin-bottom: 14px; line-height: 1.6; }
+  .intro b { color: #ff5ca8; }
+  .rule { margin-bottom: 10px; font-size: 12.5px; color: #c3c7e8; line-height: 1.6; }
+  .rule b { color: #ff5ca8; }
+  .warn { margin-top: 16px; background: #2a1f3d; border: 1px solid #6a3a6a; border-radius: 10px; padding: 12px 14px; font-size: 12.5px; color: #e8c9d9; line-height: 1.8; }
+  .warn b { color: #ffb0d0; }
+  ::-webkit-scrollbar { width: 8px; }
+  ::-webkit-scrollbar-thumb { background: #3a3d6a; border-radius: 4px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <p class="intro">命中以下规则的弹幕，<b>不会被自动朗读</b>，也不会触发 AI 答疑。列表仍显示原文。</p>
+    <div class="rule"><b>① 联系方式 / 链接</b><br>微信号、手机号、QQ号、网址、域名、邮箱、固定电话</div>
+    <div class="rule"><b>② 站外导流 / 竞品平台</b><br>快手、B站、淘宝、拼多多、闲鱼、京东、微博、公众号、视频号、小红书、知乎、斗鱼、虎牙、抖音号 等</div>
+    <div class="rule"><b>③ 广告 / 引流 / 交易</b><br>加微信、扫码、进群、刷单、返现、私聊、线下交易、定金、秒杀、砍价 等</div>
+    <div class="rule"><b>④ 医疗健康违规</b><br>药品、处方、治愈、保健品、补肾、减肥、医美、植发、祖传秘方、就诊 等</div>
+    <div class="rule"><b>⑤ 金融违规</b><br>荐股、股票、内幕、贷款、网贷、理财、稳赚、虚拟币、炒币、开户 等</div>
+    <div class="rule"><b>⑥ 未成年人相关</b><br>未成年、小孩、学生、几岁、真实年龄 等</div>
+    <div class="rule"><b>⑦ 赌博博彩</b><br>赌博、彩票、赌球、六合彩、下注、盘口 等</div>
+    <div class="rule"><b>⑧ 违规物品交易</b><br>烟酒、管制刀具、毒品、假币、走私、账号交易、代练 等</div>
+    <div class="rule"><b>⑨ 敏感 / 引战 / 辱骂</b><br>辱骂、人身攻击、引战、低俗 等</div>
+    <div class="rule"><b>⑩ 用户自定义黑名单</b><br>在「AI 答疑」页 aiFilter 输入框里填的关键词（分号分隔）</div>
+    <div class="warn">
+      <b>⚠️ 提醒</b><br>
+      1. 此过滤是基础防线，平台审核还看语义与语境，无法 100% 拦截全部违规。<br>
+      2. 命中规则的弹幕仅不朗读/不答疑，仍会在实时弹幕列表正常显示。<br>
+      3. 直播内容（含 AI 朗读）的责任在直播方，请遵守平台规则与法律法规。<br>
+      4. 词库可能误伤正常内容（如"白酒""几岁""聊股票"），如遇误拦可调整规则或联系我收窄。
+    </div>
+  </div>
+</body>
+</html>

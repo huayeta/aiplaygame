@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>虚拟声卡安装与配置指南</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Microsoft YaHei', system-ui, sans-serif; background: #171830; color: #e7e9f7; }
+  .wrap { padding: 18px 22px; max-height: 100vh; overflow-y: auto; }
+  .doc-title { font-size: 17px; font-weight: 700; color: #fff; margin-bottom: 4px; }
+  .doc-sub { font-size: 12px; color: #8f94c0; margin-bottom: 16px; }
+  .sec-title { font-size: 14px; font-weight: 700; color: #b7a6ff; margin: 18px 0 8px; }
+  .p { font-size: 12.5px; color: #c3c7e8; line-height: 1.7; margin-bottom: 8px; }
+  .step { font-size: 12.5px; color: #c3c7e8; line-height: 1.7; margin: 0 0 7px 4px; padding-left: 18px; position: relative; }
+  .step::before { content: attr(data-n); position: absolute; left: 0; top: 0; color: #ff5ca8; font-weight: 700; }
+  .pick { display: inline-block; background: #1e2040; border: 1px solid #3a3d6a; border-radius: 6px; padding: 1px 8px; color: #22d39a; font-weight: 700; }
+  .note { font-size: 12px; color: #8f94c0; line-height: 1.7; margin-top: 6px; padding-left: 4px; }
+  .linkbox { margin: 10px 0 6px; background: #1e2040; border: 1px solid #3a3d6a; border-radius: 10px; padding: 12px 14px; font-size: 12.5px; color: #e7e9f7; line-height: 1.9; }
+  .linkbox b { color: #22d39a; }
+  .warn { margin-top: 6px; background: #2a1f3d; border: 1px solid #6a3a6a; border-radius: 10px; padding: 12px 14px; font-size: 12.5px; color: #e8c9d9; line-height: 1.8; }
+  .warn div { margin-bottom: 6px; }
+  .warn div:last-child { margin-bottom: 0; }
+  .warn b { color: #ffb0d0; }
+  ::-webkit-scrollbar { width: 8px; }
+  ::-webkit-scrollbar-thumb { background: #3a3d6a; border-radius: 4px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="doc-title">抖音小游戏直播：虚拟声卡安装与配置指南</div>
+    <div class="doc-sub">（Voicemeeter Banana）</div>
+
+    <div class="sec-title">一、为什么需要虚拟声卡</div>
+    <div class="p">在抖音小游戏直播中，AI 播报和弹幕朗读的声音默认输出到电脑的扬声器，观众听不到。要让这些声音进入直播间，需要一条声音路由：把软件的声音输出到虚拟声卡，再让抖音直播伴侣把虚拟声卡当作麦克风采集，这样 AI 语音就能被观众听到。</div>
+    <div class="p">虚拟声卡的本质是一个软件混音设备，作用只是把声音从“扬声器”改道到“直播伴侣的麦克风输入”，不改变声音内容。</div>
+
+    <div class="sec-title">二、下载与安装 Voicemeeter Banana</div>
+    <div class="p">Voicemeeter Banana 是 VB-Audio 出品的免费虚拟声卡（捐赠软件，全部功能免费使用），是目前最常用的方案。安装包会同时安装 Voicemeeter 和 Voicemeeter Banana 两个程序。</div>
+    <div class="step" data-n="1.">打开官网 www.voicemeeter.com，在顶部导航点开 Banana 标签页（或直接访问 vb-audio.com/Voicemeeter/banana.htm）。</div>
+    <div class="step" data-n="2.">在 Banana 页面点击下载链接，得到安装包（约 20 MB，支持 Windows XP 至 Windows 11，32/64 位均可）。</div>
+    <div class="step" data-n="3.">运行安装程序，按默认选项一路下一步，直到安装完成。安装过程中 Windows 会短暂安装新的音频驱动，属正常现象。</div>
+    <div class="step" data-n="4.">安装完成后，在系统声音设置（控制面板/设置里的“声音”）可以看到新增的虚拟设备，常见的有 Voicemeeter Input、Voicemeeter Output（VAIO），以及 Voicemeeter AUX 等。</div>
+
+    <div class="sec-title">三、Voicemeeter 控制台设置（点亮 B1）</div>
+    <div class="p">从开始菜单打开 <span class="pick">Voicemeeter Banana x64</span>（主控制台），只需要设置一处：</div>
+    <div class="step" data-n="5.">看中间 VIRTUAL INPUTS 区域，左边第一列显示 <span class="pick">Voicemeeter Input</span>（不是 AUX 那列）。</div>
+    <div class="step" data-n="6.">在这一列下方的路由按钮区（A1 / A2 / A3 / B1 / B2 那排），点击 <span class="pick">B1</span> 让它变亮，声音才会从 B1 虚拟输出出去。</div>
+    <div class="p">其他保持默认：最左三列 HARDWARE INPUT 不用选（那是物理麦克风）；HARDWARE OUT 的 A1 可选 Realtek 扬声器让你自己也能听到（不选也不影响直播间）；Input 列推子放 0dB 附近即可。</div>
+
+    <div class="sec-title">四、客户端声音设备设置</div>
+    <div class="p">aiplaygame 客户端已内置“声音设备”设置页，用于把 AI 播报和弹幕朗读的声音定向输出到指定设备。</div>
+    <div class="step" data-n="7.">打开客户端，点击左侧菜单的“声音设备”。</div>
+    <div class="step" data-n="8.">点击“刷新设备”，等待下拉框中列出系统音频输出设备。</div>
+    <div class="step" data-n="9.">在“语音输出设备”下拉框中，选择 <span class="pick">Voicemeeter Input (VB-Audio Voicemeeter VAIO)</span>。不要选 Voicemeeter AUX Input，也不要选列表里 In 1~5、VAIO3 等多余端点。</div>
+    <div class="step" data-n="10.">点击“保存”。之后 AI 播报、弹幕朗读、定时播报等所有语音都会从选中的设备输出。</div>
+
+    <div class="sec-title">五、抖音直播伴侣设置</div>
+    <div class="step" data-n="11.">打开抖音直播伴侣，进入“调音台”，点击“+ 添加音频源”。</div>
+    <div class="step" data-n="12.">设备类别选“麦克风”，音频源选择 <span class="pick">Voicemeeter Out B1 (VB-Audio Voicemeeter VAIO)</span>；音量 100、降噪保持关闭、声道双声道、监听仅输出，其余默认，点击“添加”。</div>
+    <div class="step" data-n="13.">确认直播伴侣混音器中 Voicemeeter Out B1 有声音电平跳动（在客户端触发一条语音播报验证）。</div>
+
+    <div class="sec-title">六、声音链路与验证</div>
+    <div class="p">配置完成后，完整的声音链路如下：</div>
+    <div class="linkbox"><b>AI 播报 / 弹幕朗读</b> → 客户端选 Voicemeeter Input → <b>控制台 Input 列点亮 B1</b> → Voicemeeter Out B1（录音端）→ <b>直播伴侣麦克风采集</b> → 直播间观众听到</div>
+    <div class="p">验证方法：在客户端触发一条播报（如定时播报或让弹幕朗读一条消息），观察直播伴侣的麦克风电平是否有波动；再开播测试，确认观众端能听到 AI 语音。</div>
+
+    <div class="sec-title">七、重要提醒</div>
+    <div class="warn">
+      <div>1. 虚拟声卡只是声音路由，它解决的是“软件声音进直播间”的问题，不属于任何形式的规避手段。</div>
+      <div>2. 抖音对无人直播、AI 虚拟主播、批量代播的检测是多维度的（画面是否变化、互动是否真实、行为模式、开播频次等），不是装一个虚拟声卡就能避开。</div>
+      <div>3. 建议保持画面内容有变化、控制播报节奏与频次、必要时真人辅助互动，把虚拟声卡当作正常的直播声音方案使用。</div>
+    </div>
+  </div>
+</body>
+</html>

@@ -18,6 +18,13 @@
   .play { background: linear-gradient(135deg,#22d39a,#16a34a); }
   .stop { background: linear-gradient(135deg,#f59e0b,#d97706); }
   .shot { background: #3a3d63; }
+  .mute { background: #3a3d63; }
+  .mute.on { background: linear-gradient(135deg,#ff5ca8,#e11d48); }
+  .txt { width: 100%; box-sizing: border-box; padding: 9px; border-radius: 8px; background: #0f1020; color: #e8e9f5; border: 1px solid #2a2d52; margin-bottom: 8px; font-size: 13px; }
+  .aiRow { display: flex; gap: 8px; }
+  .aiRow button { flex: 1; }
+  .aiGo { background: linear-gradient(135deg,#7c5cff,#5a3fd6); }
+  .aiStopBtn { background: linear-gradient(135deg,#f59e0b,#d97706); }
   .row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; font-size: 13px; }
   .row .num { width: 54px; text-align: center; background: #0f1020; color: #fff; border: 1px solid #2a2d48; border-radius: 6px; padding: 5px; margin: 0 6px; font-size: 13px; }
   select, input[type=range] { width: 130px; }
@@ -67,6 +74,20 @@
   </div>
 
   <div class="sec">
+    <div class="t">声音控制</div>
+    <button class="mute" id="gameMute">🔇 静音（游戏无声）</button>
+    <div class="hint">一键静音游戏窗口声音，观众只听到 AI 语音和背景音乐</div>
+  </div>
+
+  <div class="sec">
+    <div class="t">AI 控制（说一句，AI 自己点）</div>
+    <input class="txt" id="aiCmd" placeholder="例如：一直点棋盘右上角 / 先点左上再点中间">
+    <div class="aiRow"><button class="aiGo" id="aiGo">▶ AI 执行</button><button class="aiStopBtn" id="aiStopCtl">■ 停止</button></div>
+    <label class="check" style="display:block;margin:6px 0;"><input type="checkbox" id="aiVision" checked> 视觉反馈（AI 执行中自动检测画面，卡住/过关会自适应调整）</label>
+    <div class="hint" id="aiNote">使用主窗口「AI读弹幕答疑」的智谱配置，无需重复填 Key</div>
+  </div>
+
+  <div class="sec">
     <div class="t">选项</div>
     <div class="row">
       <span>点击方式</span>
@@ -80,10 +101,9 @@
       <input type="range" id="speed" min="0.5" max="3" step="0.5" value="1">
     </div>
     <label class="check"><input type="checkbox" id="loop" checked> 播完循环</label>
-    <label class="check"><input type="checkbox" id="askStart" checked> 每次打开都询问</label>
     <label class="check"><input type="checkbox" id="freshAlways"> 总是重新开始新游戏</label>
     <button class="shot" id="shot">📷 截图（存模板）</button>
-    <div class="hint">软点击失效时改 CDP；速度仅缩短点击间隔。</div>
+    <div class="hint">「总是重新开始新游戏」开=每次打开都从第1关开始；关=默认继续上次存档。不再弹窗询问。软点击失效时改 CDP；速度仅缩短点击间隔。</div>
   </div>
 
   <div class="sec">
@@ -100,6 +120,23 @@
   $('playStart').onclick = () => window.panel.playStart(parseInt($('playFrom').value) || 1);
   $('playStop').onclick = () => window.panel.playStop();
   $('shot').onclick = () => window.panel.capture();
+  $('gameMute').onclick = async () => {
+    const muted = await window.panel.toggleMute();
+    $('gameMute').textContent = muted ? '🔊 取消静音（游戏有声）' : '🔇 静音（游戏无声）';
+    $('gameMute').classList.toggle('on', muted);
+  };
+  $('aiGo').onclick = async () => {
+    const text = $('aiCmd').value.trim();
+    if (!text) { $('aiNote').textContent = '请先输入操作指令，例如：一直点棋盘右上角'; return; }
+    const cfg = await window.panel.getAICfg();
+    if (!cfg || !cfg.key) { $('aiNote').textContent = '请先在主窗口「AI读弹幕答疑」里填写智谱 API Key'; return; }
+    $('aiNote').textContent = 'AI 规划中…（使用智谱配置）';
+    const r = await window.panel.aiPlan({ text, apiKey: cfg.key, baseUrl: cfg.base, model: cfg.model });
+    if (!r || !r.ok) { $('aiNote').textContent = '规划失败：' + (r && r.error || '未知错误'); return; }
+    $('aiNote').textContent = '计划：' + (r.plan.note || '已生成') + '（' + r.plan.points.length + ' 个点，间隔 ' + r.plan.intervalMs + 'ms' + ($('aiVision').checked ? '，视觉反馈已开启' : '') + '）';
+    window.panel.aiStart({ plan: r.plan, text, visionOn: $('aiVision').checked });
+  };
+  $('aiStopCtl').onclick = () => window.panel.aiStop();
 
   $('method').onchange = e => window.panel.setOption({ method: e.target.value });
   $('speed').oninput = e => {
@@ -109,14 +146,17 @@
   };
   $('loop').onchange = e => window.panel.setOption({ loop: e.target.checked });
   $('autoMark').onchange = e => window.panel.setOption({ autoMark: e.target.checked });
-  $('askStart').onchange = e => {
-    if (e.target.checked) { $('freshAlways').checked = false; window.panel.setOption({ freshStart: false }); }
-    window.panel.setOption({ askEveryStart: e.target.checked });
-  };
-  $('freshAlways').onchange = e => {
-    if (e.target.checked) { $('askStart').checked = false; window.panel.setOption({ askEveryStart: false }); }
-    window.panel.setOption({ freshStart: e.target.checked });
-  };
+  $('freshAlways').onchange = e => window.panel.setOption({ freshStart: e.target.checked });
+
+  // 打开控制台时按当前游戏加载独立配置
+  window.panel.getOption().then(opts => {
+    if (!opts) return;
+    if (opts.method) $('method').value = opts.method;
+    if (opts.speed) { $('speed').value = opts.speed; $('speedVal').textContent = opts.speed.toFixed(1) + 'x'; }
+    if (opts.loop !== undefined) $('loop').checked = !!opts.loop;
+    if (opts.autoMark !== undefined) $('autoMark').checked = !!opts.autoMark;
+    if (opts.freshStart !== undefined) $('freshAlways').checked = !!opts.freshStart;
+  });
 
   // 关卡管理（实时更新，每次动作自动刷新）
   function renderLevels(data) {
