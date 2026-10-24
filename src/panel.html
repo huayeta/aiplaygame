@@ -193,7 +193,7 @@
     $('status').textContent = d.text || '';
     const dot = $('dot');
     dot.className = 'dot' + (d.recording ? ' rec' : d.playing ? ' on' : '');
-    $('state').textContent = d.recording ? '录制中' : d.playing ? '自动玩中' : '就绪';
+    $('state').textContent = d.recording ? '录制中' : (d.phase === 'test' ? '测试中' : d.phase === 'prep' ? '推进中' : d.playing ? '自动玩中' : '就绪');
   });
 </script>
 </body>

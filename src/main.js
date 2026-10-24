@@ -15,6 +15,20 @@ const SCRIPTS_DIR = path.join(ROOT, 'config', 'scripts'); // 各游戏关卡脚�
 const MEDIA_DIR = path.join(ROOT, 'config', 'media'); // 背景音乐素材库
 const TPL_DIR = path.join(ROOT, 'templates');
 
+// 参考音频路径统一处理：voices.json 里存相对项目根的路径（整目录可复制），使用时解析成绝对路径
+function resolveRef(p) {
+  const s = String(p || '').trim();
+  if (!s) return '';
+  if (path.isAbsolute(s) || /^[a-zA-Z]:[\\/]/.test(s) || s.includes('://')) return s;
+  return path.join(ROOT, s.split('/').join(path.sep));
+}
+function toRelRef(absPath) {
+  return path.relative(ROOT, absPath).split(path.sep).join('/');
+}
+function isStoredVoice(p) {
+  return resolveRef(p).startsWith(path.join(ROOT, 'config', 'voices'));
+}
+
 const GAME_W = 414;
 const GAME_H = 736; // 9:16
 
@@ -31,6 +45,7 @@ const auto = {
   gameId: null,
   recording: false,
   playing: false,
+  phase: '', // 当前阶段标记：''=常规 | 'prep'=重录推进（面板显示"推进中"，非"自动玩中"）
   cdpAttached: false,
   script: null,
   lastTapTime: 0,
@@ -98,15 +113,15 @@ ipcMain.handle('ai:addVoice', async (e, v) => {
   const refAudio = String(v && v.refAudio || '').trim();
   if (!name) return { ok: false, err: '请填写音色名称' };
   if (!refAudio) return { ok: false, err: '请选择参考音频' };
-  // 复制到 config/voices 目录，避免原始文件被移动/删除导致失效
+  // 复制到 config/voices 目录，避免原始文件被移动/删除导致失效；存相对路径便于整体迁移
   const voicesDir = path.join(ROOT, 'config', 'voices');
   try { fs.mkdirSync(voicesDir, { recursive: true }); } catch (e) {}
   let storedPath = refAudio;
   try {
     const ext = path.extname(refAudio) || '.wav';
     const dest = path.join(voicesDir, `voice_${Date.now()}_${name.replace(/[\\/:*?"<>|]/g, '_')}${ext}`);
-    fs.copyFileSync(refAudio, dest);
-    storedPath = dest;
+    fs.copyFileSync(resolveRef(refAudio), dest);
+    storedPath = toRelRef(dest);
   } catch (e) { /* 复制失败则沿用原路径 */ }
   const rec = { id: Date.now().toString(), name, refAudio: storedPath, promptText: String(v && v.promptText || '').trim(), createdAt: Date.now() };
   list.push(rec);
@@ -118,8 +133,8 @@ ipcMain.handle('ai:deleteVoice', async (e, id) => {
   const rec = list.find(x => x.id === id);
   list = list.filter(x => x.id !== id);
   writeVoices(list);
-  if (rec && rec.refAudio && rec.refAudio.startsWith(path.join(ROOT, 'config', 'voices'))) {
-    try { fs.unlinkSync(rec.refAudio); } catch (e) {}
+  if (rec && isStoredVoice(rec.refAudio)) {
+    try { fs.unlinkSync(resolveRef(rec.refAudio)); } catch (e) {}
   }
   return { ok: true, list };
 });
@@ -139,12 +154,12 @@ ipcMain.handle('ai:updateVoice', async (e, id, v) => {
     try {
       const ext = path.extname(newAudio) || '.wav';
       const dest = path.join(voicesDir, `voice_${Date.now()}_${name.replace(/[\\/:*?"<>|]/g, '_')}${ext}`);
-      fs.copyFileSync(newAudio, dest);
-      storedPath = dest;
+      fs.copyFileSync(resolveRef(newAudio), dest);
+      storedPath = toRelRef(dest);
     } catch (e) { /* 复制失败则沿用新路径 */ }
     // 若原文件是本库内复制品且被替换，删除旧副本
-    if (rec.refAudio && rec.refAudio.startsWith(path.join(ROOT, 'config', 'voices')) && rec.refAudio !== storedPath) {
-      try { fs.unlinkSync(rec.refAudio); } catch (e) {}
+    if (isStoredVoice(rec.refAudio) && rec.refAudio !== storedPath) {
+      try { fs.unlinkSync(resolveRef(rec.refAudio)); } catch (e) {}
     }
     rec.refAudio = storedPath;
   }
@@ -153,7 +168,7 @@ ipcMain.handle('ai:updateVoice', async (e, id, v) => {
 });
 function setStatus(text, extra = {}) {
   if (panelWin && !panelWin.isDestroyed()) {
-    panelWin.webContents.send('status', { text, ...extra, recording: auto.recording, playing: auto.playing });
+    panelWin.webContents.send('status', { text, ...extra, phase: auto.phase || '', recording: auto.recording, playing: auto.playing });
   }
 }
 
@@ -304,9 +319,13 @@ function createAI() {
 const VOICE_TMP = path.join(os.tmpdir(), 'aiassist_voice');
 try { fs.mkdirSync(VOICE_TMP, { recursive: true }); } catch (e) {}
 
+// 百度 TTS OAuth token 缓存（有效期 30 天，内存复用）
+let baiduToken = null;
+let baiduTokenExp = 0;
+
 ipcMain.handle('ai:open', () => createAI());
 
-// 用免费 edge-tts 云端合成语音，返回本地 file:// 音频 URL
+// 合成语音，返回本地 file:// 音频 URL（edge-tts / 本地 GPT-SoVITS / 阿里云 Qwen3-TTS）
 ipcMain.handle('ai:tts', async (e, opts) => {
   const text = String(opts && opts.text || '').trim();
   if (!text) return { ok: false, err: '文案为空' };
@@ -318,7 +337,7 @@ ipcMain.handle('ai:tts', async (e, opts) => {
 
     if (engine === 'sovits') {
       // 本地 GPT-SoVITS 引擎：调用 127.0.0.1:9880
-      const refAudio = String(opts && opts.refAudio || '').trim();
+      const refAudio = resolveRef(opts && opts.refAudio);
       if (!refAudio) return { ok: false, err: '本地引擎需先选择参考音频（音色）' };
       const outPath = path.join(dir, 'tts.wav');
       const inferParams = {};
@@ -327,6 +346,69 @@ ipcMain.handle('ai:tts', async (e, opts) => {
       if (Number(opts.sampleSteps)) inferParams.sample_steps = Math.round(Number(opts.sampleSteps));
       const ok = await sovitsTts(text, refAudio, outPath, speed, inferParams);
       if (!ok) return { ok: false, err: '本地 GPT-SoVITS 合成失败（请确认 127.0.0.1:9880 服务已启动）' };
+      return { ok: true, url: pathToFileURL(outPath).href };
+    }
+
+    if (engine === 'qwen3') {
+      // 阿里云 Qwen3-TTS：DashScope 百炼非流式合成（返回 OSS 音频 URL → 下载到本地）
+      const a = (clientConfig && clientConfig.aiChat) || {};
+      const qwenKey = String(opts && opts.apiKey || '').trim() || String(a.qwenKey || '').trim();
+      if (!qwenKey) return { ok: false, err: '请先在 AI 主播页「阿里云 Qwen3-TTS」填写 API Key' };
+      const qwenModel = String(opts && opts.model || '').trim() || String(a.qwenModel || '').trim() || 'qwen3-tts-flash';
+      const voice = String(opts && opts.voice || '').trim() || 'Cherry';
+      const apiUrl = String(opts && opts.baseUrl || '').trim() || 'https://dashscope.aliyuncs.com/api/v1';
+      const r = await fetch(apiUrl.replace(/\/+$/, '') + '/services/aigc/multimodal-generation/generation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + qwenKey },
+        body: JSON.stringify({ model: qwenModel, input: { text, voice, language_type: 'Chinese' }, parameters: { stream: false } })
+      });
+      const j = await r.json().catch(() => null);
+      if (!r.ok) return { ok: false, err: (j && (j.message || j.code)) || ('HTTP ' + r.status) };
+      const audioUrl = j && j.output && j.output.audio && j.output.audio.url;
+      if (!audioUrl) return { ok: false, err: '合成失败：未返回音频 URL（' + (j && j.message || '未知错误') + '）' };
+      const dl = await fetch(audioUrl);
+      if (!dl.ok) return { ok: false, err: '下载音频失败 HTTP ' + dl.status };
+      const buf = Buffer.from(await dl.arrayBuffer());
+      const name = path.basename(new URL(audioUrl).pathname) || 'tts.mp3';
+      const outPath = path.join(dir, /\.(mp3|wav|pcm|ogg|m4a)$/i.test(name) ? name : ('tts' + (name.includes('.') ? name.slice(name.lastIndexOf('.')) : '.mp3')));
+      fs.writeFileSync(outPath, buf);
+      return { ok: true, url: pathToFileURL(outPath).href };
+    }
+
+    if (engine === 'baidu') {
+      // 百度智能云短文本语音合成：AK/SK 换 OAuth token → tsn.baidu.com/text2audio
+      const a = (clientConfig && clientConfig.aiChat) || {};
+      const ak = String(opts && opts.apiKey || '').trim() || String(a.baiduAk || '').trim();
+      const sk = String(opts && opts.apiSecret || '').trim() || String(a.baiduSk || '').trim();
+      if (!ak || !sk) return { ok: false, err: '请先在 AI 主播页「百度智能云 TTS」填写 AK 和 SK' };
+      // 取 access_token（内存缓存 30 天内复用，百度 token 有效期 30 天）
+      if (!baiduToken || !baiduTokenExp || Date.now() >= baiduTokenExp) {
+        const tr = await fetch('https://aip.baidubce.com/oauth/2.0/token?grant_type=client_credentials&client_id=' + encodeURIComponent(ak) + '&client_secret=' + encodeURIComponent(sk), { method: 'POST' });
+        const tj = await tr.json().catch(() => null);
+        if (!tr.ok || !tj || !tj.access_token) return { ok: false, err: '百度获取 token 失败：' + ((tj && (tj.error_description || tj.error)) || ('HTTP ' + tr.status)) };
+        baiduToken = tj.access_token;
+        baiduTokenExp = Date.now() + (Math.max(60, Number(tj.expires_in) || 2592000) - 60) * 1000;
+      }
+      const per = String(opts && opts.voice || '').trim() || '0';
+      const spd = Math.max(0, Math.min(15, Math.round(5 + (speed - 1) * 10))); // 语速 0~15，默认 5
+      const form = new URLSearchParams({
+        tex: text, tok: baiduToken, cuid: 'aiplaygame', ctp: '1', lan: 'zh',
+        spd: String(spd), pit: '5', vol: '5', per, aue: '3'
+      });
+      const sr = await fetch('https://tsn.baidu.com/text2audio', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: form.toString()
+      });
+      const ct = sr.headers.get('content-type') || '';
+      if (ct.includes('application/json')) {
+        const ej = await sr.json().catch(() => null);
+        return { ok: false, err: '百度合成失败：' + ((ej && (ej.err_msg || ej.err_no)) || ('HTTP ' + sr.status)) };
+      }
+      if (!sr.ok) return { ok: false, err: '百度合成失败 HTTP ' + sr.status };
+      const buf = Buffer.from(await sr.arrayBuffer());
+      const outPath = path.join(dir, 'tts.mp3');
+      fs.writeFileSync(outPath, buf);
       return { ok: true, url: pathToFileURL(outPath).href };
     }
 
@@ -351,11 +433,12 @@ ipcMain.handle('ai:tts', async (e, opts) => {
 
 // 调用本地 GPT-SoVITS api_v2.py 的 /tts 接口，合成并保存为 wav
 function sovitsTts(text, refAudio, outPath, speed, inferParams) {
+  refAudio = resolveRef(refAudio);
   // 参考文本：从音色库按参考音频匹配补全
   let promptText = '';
   try {
     const voices = JSON.parse(fs.readFileSync(VOICES_FILE, 'utf8'));
-    const hit = (voices || []).find(v => v.refAudio === refAudio);
+    const hit = (voices || []).find(v => resolveRef(v.refAudio) === refAudio);
     if (hit && hit.promptText) promptText = String(hit.promptText).trim();
   } catch (e) {}
   return new Promise((resolve) => {
@@ -452,7 +535,7 @@ ipcMain.handle('media:delete', async (e, file) => {
 
 // 预热本地 GPT-SoVITS 参考音频缓存：调用 GET /set_refer_audio 提前把特征加载进内存
 ipcMain.handle('ai:warmup', async (e, refAudio) => {
-  const ref = String(refAudio || '').trim();
+  const ref = resolveRef(refAudio);
   if (!ref) return { ok: false, err: '请先选择参考音频' };
   return new Promise((resolve) => {
     const qs = encodeURIComponent(ref);
@@ -472,7 +555,7 @@ ipcMain.handle('ai:warmup', async (e, refAudio) => {
 // 流式 TTS：请求 streaming_mode=2 返回 raw PCM，边收边推给渲染进程，实现先出声后补全
 ipcMain.handle('ai:sovitsStream', async (e, opts) => {
   const text = String(opts && opts.text || '').trim();
-  const refAudio = String(opts && opts.refAudio || '').trim();
+  const refAudio = resolveRef(opts && opts.refAudio);
   const speed = Number(opts && opts.speed) || 1;
   const minChunk = Math.max(10, Math.min(100, Number(opts && opts.minChunk) || 40)); // 流式切块大小，客户端可调（10~100）
   const temperature = Number(opts && opts.temperature); // 越低越稳，过高会"飘"
@@ -489,7 +572,7 @@ ipcMain.handle('ai:sovitsStream', async (e, opts) => {
   if (!promptText) {
     try {
       const voices = JSON.parse(fs.readFileSync(VOICES_FILE, 'utf8'));
-      const hit = (voices || []).find(v => v.refAudio === refAudio);
+      const hit = (voices || []).find(v => resolveRef(v.refAudio) === refAudio);
       if (hit && hit.promptText) promptText = String(hit.promptText).trim();
     } catch (e) {}
   }
@@ -666,8 +749,19 @@ async function cdpTap(x, y) {
 }
 
 async function doTap(x, y) {
-  if (auto.options.method === 'cdp') await cdpTap(x, y);
-  else await softTap(x, y);
+  // 坐标统一换算：>1 视为绝对像素（旧脚本 / AI 视觉计划），否则视为 0~1 相对比例 → 按当前窗口实际尺寸换算
+  let px = Number(x), py = Number(y);
+  let cw = GAME_W, ch = GAME_H;
+  if (gameWin && !gameWin.isDestroyed()) {
+    const s = gameWin.getContentSize();
+    if (s && s.width > 0 && s.height > 0) { cw = s.width; ch = s.height; }
+  }
+  if (px <= 1) px *= cw;
+  if (py <= 1) py *= ch;
+  px = Math.max(0, Math.min(cw, Math.round(px)));
+  py = Math.max(0, Math.min(ch, Math.round(py)));
+  if (auto.options.method === 'cdp') await cdpTap(px, py);
+  else await softTap(px, py);
 }
 
 // ---------- 画面相似度（用于判定过关/切屏） ----------
@@ -707,16 +801,33 @@ async function waitForChange(threshold, timeout = 8000) {
 
 // ---------- 录制 ----------
 function startRecording() {
-  auto.script = {
-    gameId: auto.gameId,
-    window: { w: GAME_W, h: GAME_H },
-    levels: [ { name: 'L1', taps: [] } ],
-    recordedAt: new Date().toISOString()
-  };
+  if (auto.recording) { setStatus('当前已在录制中'); return; }
+  // 已有脚本 → 追加新关接着录（保留已有关卡）；最后一关没点 → 直接复用该关；无脚本 → 从 L1 新建
+  let script = readScript(auto.gameId);
+  let msg;
+  if (script && script.levels && script.levels.length) {
+    auto.script = script;
+    const last = script.levels[script.levels.length - 1];
+    if (last.taps && last.taps.length === 0) {
+      msg = '从第 ' + script.levels.length + ' 关开始录制（该关还没有点）';
+    } else {
+      const n = script.levels.length + 1;
+      script.levels.push({ name: 'L' + n, taps: [] });
+      msg = '开始录制第 ' + n + ' 关…（已有 ' + (script.levels.length - 1) + ' 关保留）';
+    }
+  } else {
+    auto.script = {
+      gameId: auto.gameId,
+      window: { w: GAME_W, h: GAME_H },
+      levels: [ { name: 'L1', taps: [] } ],
+      recordedAt: new Date().toISOString()
+    };
+    msg = '开始录制第 1 关…';
+  }
   auto.recording = true;
   auto.lastTapTime = Date.now();
   if (auto.options.autoMark) startAutoMark();
-  setStatus('录制中… 自动标记已' + (auto.options.autoMark ? '开启' : '关闭') + '，画面切到新棋盘会自动分关');
+  setStatus(msg + (auto.options.autoMark ? '，自动标记已开启' : ''));
 }
 function markLevel() {
   if (!auto.recording || !auto.script) return;
@@ -847,17 +958,13 @@ async function startPlayback(startIdx = 1) {
   auto.playing = true;
   auto.abort = false;
   if (gameWin && !gameWin.isDestroyed()) gameWin.focus();
-  // 指定从第 N 关开始时，先自动推进到该关
-  if (startIdx > 1) {
-    setStatus('正在推进到第 ' + startIdx + ' 关…');
-    await runLevels(script, 0, startIdx - 1, '推进到第');
-    if (auto.abort) { auto.playing = false; setStatus('已停止'); return; }
-  }
-  setStatus('自动玩从第 ' + startIdx + ' 关开始');
+  setStatus('自动玩从第 ' + startIdx + ' 关开始' + (auto.options.loop ? '（循环）' : ''));
   let li = startIdx - 1;
   while (auto.playing && !auto.abort) {
     const level = script.levels[li];
     if (level && level.taps.length) {
+      auto.highlight = li + 1; // 当前正在播的关高亮
+      sendLevels();
       setStatus('自动玩 第 ' + (li + 1) + ' 关');
       for (const t of level.taps) {
         if (auto.abort) break;
@@ -868,12 +975,13 @@ async function startPlayback(startIdx = 1) {
     }
     li++;
     if (li >= script.levels.length) {
-      if (auto.options.loop) { li = startIdx - 1; await sleep(1000); }
-      else break;
+      if (auto.options.loop) { li = startIdx - 1; await sleep(1000); } // 循环：从填写的关重新开始
+      else break; // 不循环：玩完最后一关停止
     }
   }
   auto.playing = false;
-  setStatus(auto.abort ? '已停止' : '回放结束');
+  if (auto.highlight) { auto.highlight = 0; sendLevels(); }
+  setStatus(auto.abort ? '已停止' : '自动玩结束（已播完第 ' + script.levels.length + ' 关）');
 }
 
 // 回放脚本前 count 关，用于"重录某关"时推进游戏到目标关
@@ -894,6 +1002,7 @@ async function replayPrefix(script, count, onDone) {
     }
   }
   auto.playing = false;
+  if (auto.phase === 'prep') auto.phase = ''; // 重录推进结束（含中止），清准备标记
   if (!auto.abort && onDone) onDone();
 }
 
@@ -918,7 +1027,7 @@ async function runLevels(script, from, to, label, onLevel) {
   auto.playing = false;
 }
 
-// 测试某一关：先自动推进到该关，再只播这一关，并提示是否过关
+// 测试某一关：在当前画面直接播放该关录制的点击（不推进到该关，只点这一遍）
 function testLevelAt(idx) {
   const script = readScript(auto.gameId);
   if (!script) { setStatus('没有脚本'); return; }
@@ -926,33 +1035,34 @@ function testLevelAt(idx) {
     dialog.showMessageBox({
       type: 'warning',
       message: '该关不存在',
-      detail: '当前脚本只有 ' + script.levels.length + ' 关（' + script.levels.map(l => l.name).join('、') + '）。请先录制到第 ' + (idx + 1) + ' 关再测试。'
+      detail: '当前脚本只有 ' + script.levels.length + ' 关（' + script.levels.map(l => l.name).join('、') + '）。'
     });
     return;
   }
   if (auto.playing || auto.recording) { setStatus('请先停止录制/回放再测试'); return; }
-  auto.abort = false; // 清除上次停止留下的标志，测试是新的主动动作
-  const hl = (n) => { auto.highlight = n; sendLevels(); };
-  hl(idx + 1);
-  setStatus('开始测试第 ' + (idx + 1) + ' 关（先推进到该关）…');
-  runLevels(script, 0, idx, '推进到第', hl).then(async () => {
-    if (auto.abort) return;
-    await runLevels(script, idx, idx + 1, '正在测试第', hl);
-    if (auto.abort) return;
-    const changed = await waitForChange(auto.options.threshold, 8000);
-    auto.highlight = 0;
-    sendLevels();
-    setStatus(changed
-      ? '第 ' + (idx + 1) + ' 关测试完成，画面有变化（预计已过关）'
-      : '第 ' + (idx + 1) + ' 关测试完成，但画面未切换（可能没过关）');
-  });
+  const level = script.levels[idx];
+  if (!level.taps.length) { setStatus('该关还没有录制点，先录制'); return; }
+  auto.abort = false; // 清除上次停止留下的标志
+  auto.phase = 'test';
+  auto.playing = true;
+  setStatus('测试第 ' + (idx + 1) + ' 关（当前画面执行 ' + level.taps.length + ' 个点）…');
+  (async () => {
+    if (gameWin && !gameWin.isDestroyed()) gameWin.focus();
+    for (const t of level.taps) {
+      if (auto.abort) break;
+      await sleep(Math.max(0, t.delay) / auto.options.speed);
+      await doTap(t.x, t.y);
+    }
+    auto.playing = false;
+    auto.phase = '';
+    setStatus(auto.abort ? '测试已停止' : '第 ' + (idx + 1) + ' 关测试完成，已点击 ' + level.taps.length + ' 次');
+  })();
 }
 
-// 从第 N 关开始重录：自动推进到该关后进入录制（覆盖该关及之后）
+// 重录某一关：清空该关及之后的点，直接在当前画面开始录制（不自动推进）
 function reRecordAt(idx) {
   const script = readScript(auto.gameId);
   if (!script) { setStatus('没有可重录的脚本'); return; }
-  if (idx === 0) { startRecording(); return; } // 重头录
   if (idx >= script.levels.length) {
     dialog.showMessageBox({
       type: 'warning',
@@ -961,17 +1071,19 @@ function reRecordAt(idx) {
     });
     return;
   }
-  // 清掉 idx 及之后，第 idx 关置空
+  if (auto.recording || auto.playing) { setStatus('请先停止录制/回放再重录'); return; }
+  // 截断到该关（该关及之后作废），该关点清零
+  const was = script.levels[idx].taps.length;
   script.levels = script.levels.slice(0, idx + 1);
   script.levels[idx].taps = [];
+  auto.script = script;
   saveScript(auto.gameId, script);
-  setStatus('先自动推进到第 ' + idx + ' 关…');
-  replayPrefix(script, idx, () => {
-    auto.recording = true;
-    auto.lastTapTime = Date.now();
-    if (auto.options.autoMark) startAutoMark();
-    setStatus('已到达第 ' + (idx + 1) + ' 关，开始重录（覆盖原第 ' + (idx + 1) + ' 关）');
-  });
+  // 直接进入录制：追加点会写入最后一关（= 当前重录的这一关）
+  auto.recording = true;
+  auto.lastTapTime = Date.now();
+  if (auto.options.autoMark) startAutoMark();
+  sendLevels();
+  setStatus('已清空第 ' + (idx + 1) + ' 关（原 ' + was + ' 个点），开始重录——直接操作游戏即可');
 }
 
 // 删除某一关
@@ -1053,6 +1165,8 @@ const DEFAULT_CONFIG = {
     zhipuKey: '', zhipuBase: 'https://open.bigmodel.cn/api/paas/v4', zhipuModel: 'glm-4.7-flash',
     siliconKey: '', siliconBase: '', siliconModel: '',
     sensenovaKey: '', sensenovaBase: 'https://token.sensenova.cn/v1', sensenovaModel: 'sensenova-6.7-flash-lite',
+    qwenKey: '', qwenModel: 'qwen3-tts-flash',
+    baiduAk: '', baiduSk: '',
     visionModel: 'glm-4.6v-flash',
     aiPrompt: '我是一个小游戏主播，我现在玩的游戏是我要动个脑，如果有用户问玩的什么游戏，请替我回答，只回答用户的提问，其他弹幕不用回答，如果用户问什么游戏，用不同的风格去回复用户，字数在15个字左右',
     aiFilter: '', aiCool: '', aiRetry: '', aiFallback: true, aiFallOrder: '',
@@ -1245,7 +1359,13 @@ ipcMain.on('game:pointer', (e, p) => {
   if (auto.recording && auto.script) {
     const now = Date.now();
     const level = auto.script.levels[auto.script.levels.length - 1];
-    level.taps.push({ x: Math.round(p.x), y: Math.round(p.y), delay: now - auto.lastTapTime });
+    // 存 0~1 相对比例坐标（相对录制时窗口实际尺寸），换机器/改窗口大小后按比例还原
+    let cw = GAME_W, ch = GAME_H;
+    if (gameWin && !gameWin.isDestroyed()) {
+      const s = gameWin.getContentSize();
+      if (s && s.width > 0 && s.height > 0) { cw = s.width; ch = s.height; }
+    }
+    level.taps.push({ x: +(Number(p.x) / cw).toFixed(4), y: +(Number(p.y) / ch).toFixed(4), delay: now - auto.lastTapTime });
     auto.lastTapTime = now;
     sendLevels(); // 每次点击实时刷新关卡计数
   }

@@ -22,3 +22,7 @@ config/
 
 # 本地软件安装包（体积大，不入库）
 src/software/
+
+# 截图模板（游戏画面，本地产物）
+templates/
+
