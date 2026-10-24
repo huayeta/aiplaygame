@@ -5,7 +5,6 @@ const os = require('os');
 const http = require('http');
 const { execFile } = require('child_process');
 const { pathToFileURL } = require('url');
-const { MsEdgeTTS, OUTPUT_FORMAT } = require('msedge-tts');
 
 const ROOT = app.getAppPath();
 const DATA_DIR = path.join(ROOT, 'src');
@@ -331,14 +330,20 @@ ipcMain.handle('ai:tts', async (e, opts) => {
       return { ok: true, url: pathToFileURL(outPath).href };
     }
 
-    // 默认：edge-tts 云端微软晓晓
+    // 默认：edge-tts 云端（Python edge-tts 驱动，自动解析微软最新端点；msedge-tts 写死端点已被微软停用返回 200）
     const voice = (opts && opts.voice) || 'zh-CN-XiaoxiaoNeural';
     const ratePct = Math.max(-50, Math.min(100, Math.round((speed - 1) * 100)));
     const rateStr = (ratePct >= 0 ? '+' : '') + ratePct + '%';
-    const tts = new MsEdgeTTS();
-    await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
-    const r = await tts.toFile(dir, text, { rate: rateStr, volume: '+0%', pitch: '+0Hz' });
-    return { ok: true, url: pathToFileURL(r.audioFilePath).href };
+    const outPath = path.join(dir, 'tts.mp3');
+    const txtPath = path.join(dir, 'text.txt');
+    fs.writeFileSync(txtPath, text, 'utf8');
+    const py = process.env.EDGE_TTS_PYTHON || 'D:\\Python310\\python.exe';
+    const synthOk = await new Promise((resolve) => {
+      execFile(py, ['-m', 'edge_tts', '--voice', voice, '--rate=' + rateStr, '--file', txtPath, '--write-media', outPath],
+        { timeout: 60000, windowsHide: true }, (err) => resolve(!err && fs.existsSync(outPath)));
+    });
+    if (!synthOk) return { ok: false, err: 'edge-tts 云端合成失败（可改用本地 GPT-SoVITS 引擎，或检查 Python edge-tts 是否安装）' };
+    return { ok: true, url: pathToFileURL(outPath).href };
   } catch (err) {
     return { ok: false, err: String((err && err.message) || err) };
   }
