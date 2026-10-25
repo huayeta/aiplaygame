@@ -155,6 +155,40 @@
   #viewDevice .ghost:active, #viewDevice .primary:active { transform: scale(.97); }
   #viewDevice select:focus { border-color: #8b5cff !important; box-shadow: 0 0 0 3px rgba(139,92,255,.2); }
   #viewDevice .dev-card { background: #15162a; border: 1px solid #2a2d52; border-radius: 16px; padding: 22px 24px; max-width: 560px; }
+  /* ---- 模型配置（viewModel） ---- */
+  #viewModel .md-card { display:flex; align-items:flex-start; gap:12px; background:#15162a; border:1px solid #2a2d52; border-radius:14px; padding:14px 18px; margin-bottom:10px; flex-wrap:wrap; }
+  #viewModel .md-card .md-dot { width:8px; height:8px; border-radius:50%; background:#f87171; flex:none; margin-top:7px; }
+  #viewModel .md-card .md-dot.on { background:#22d39a; box-shadow:0 0 6px rgba(34,211,154,.6); }
+  #viewModel .md-card .md-grow { flex:1; min-width:200px; }
+  #viewModel .md-card .md-name { font-size:14px; font-weight:600; color:#e8e9f5; display:flex; align-items:center; gap:8px; }
+  #viewModel .md-card .md-badge { font-size:11px; color:#8b93b8; border:1px solid #2a2d52; border-radius:6px; padding:1px 6px; font-weight:400; }
+  #viewModel .md-card .md-models { font-size:11px; color:#6b7a99; margin-top:4px; overflow-wrap:anywhere; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  #viewModel .md-btn { padding:7px 14px; border-radius:9px; border:1px solid #2a2d52; background:#1c1e38; color:#e7e9f7; font-size:12px; cursor:pointer; flex:none; }
+  #viewModel .md-btn:hover { border-color:#3b4a6b; }
+  #viewModel .md-btn.danger { color:#f87171; border-color:#3a2a3a; background:#1e1526; }
+  #viewModel .md-btn.primary { background:linear-gradient(135deg,#7c5cff,#5a3fd6); border:none; color:#fff; font-weight:600; }
+  #viewModel .md-edit { display:none; flex-basis:100%; margin-top:12px; border-top:1px dashed #2a2d52; padding-top:12px; }
+  #viewModel .md-card.open .md-edit { display:block; }
+  #viewModel .md-form { display:grid; grid-template-columns:1fr 1fr; gap:12px 16px; }
+  #viewModel .md-f label { display:block; font-size:12px; color:#9aa0c8; margin-bottom:6px; }
+  #viewModel .md-f input { width:100%; padding:10px 12px; border-radius:10px; border:1px solid #2a2d52; background:#0f1020; color:#e8e9f5; font-size:13px; outline:none; }
+  #viewModel .md-f input:focus { border-color:#8b5cff; box-shadow:0 0 0 3px rgba(139,92,255,.15); }
+  #viewModel .md-f input:disabled { opacity:.55; }
+  #viewModel .md-form .md-span2 { grid-column: 1 / -1; }
+  #viewModel .md-pick { max-height:190px; overflow-y:auto; border:1px solid #2a2d52; border-radius:10px; background:#0f1020; padding:8px 10px; display:grid; grid-template-columns:1fr 1fr; gap:2px 14px; }
+  #viewModel .md-pick-empty { grid-column:1 / -1; font-size:12px; color:#6b7a99; padding:8px 2px; }
+  #viewModel .md-pick label { display:flex; align-items:center; gap:7px; font-size:12px; color:#e8e9f5; padding:4px 2px; cursor:pointer; border-radius:6px; }
+  #viewModel .md-pick label:hover { background:#161833; }
+  #viewModel .md-pick input { width:15px !important; height:15px !important; flex:none !important; accent-color:#7c5cff; }
+  #viewModel .md-pick .mk { font-size:10px; padding:1px 5px; border-radius:4px; flex:none; font-weight:600; }
+  #viewModel .md-pick .mk.v { color:#22d39a; background:rgba(34,211,154,.12); }
+  #viewModel .md-pick .mk.t { color:#7c5cff; background:rgba(124,92,255,.14); }
+  #viewModel .md-pick .mk.s { color:#fbbf24; background:rgba(251,191,36,.14); }
+  #viewModel .md-pick .mn { flex:1 1 0; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #viewModel .md-tip { font-size:11px; color:#6b7a99; display:block; margin-top:4px; }
+  #viewModel .md-newbox { background:#15162a; border:1px solid #2a2d52; border-radius:16px; padding:20px 22px; margin-top:18px; }
+  #viewModel .md-newtitle { font-size:14px; font-weight:700; color:#e8e9f5; margin-bottom:6px; }
+  #viewModel .md-newsub { font-size:12px; color:#9aa0c8; margin-bottom:16px; line-height:1.6; }
 </style>
 </head>
 <body>
@@ -163,6 +197,7 @@
     <div class="side-item active" id="navLibrary">🎮 游戏库</div>
     <div class="side-item" id="navAI">🎙 AI 主播</div>
     <div class="side-item" id="navDanmaku">💬 弹幕回复</div>
+    <div class="side-item" id="navModel">🧩 模型配置</div>
     <div class="side-item" id="navVoice">🎤 声音克隆</div>
     <div class="side-item" id="navDevice">🔊 声音设备</div>
     <button class="side-item" id="openVoiceQueue" style="border:none;cursor:pointer;text-align:left;background:#1c1e38;color:#e7e9f7;justify-content:flex-start;">🔊 语音队列</button>
@@ -427,33 +462,9 @@
         <label class="switch"><input type="checkbox" id="aiText" checked> 文字显示</label>
         <span id="aiStatus" class="ai-status" style="margin-left:auto;">● 未连接</span>
       </div>
-      <div class="ai-provider-card" data-p="dsk">
-        <label class="ap-head"><input type="radio" name="aiProvider" value="dsk" checked> DeepSeek <span class="ap-code">dsk</span></label>
-        <div class="cfg-row"><span class="cfg-label">API Key</span><input id="dskKey" type="password" placeholder="sk-..." style="flex:1;min-width:0;"></div>
-        <div class="cfg-row"><span class="cfg-label">Base URL</span><input id="dskBase" type="text" value="https://api.deepseek.com" style="flex:1;min-width:0;"></div>
-        <div class="cfg-row"><span class="cfg-label">Model</span><input id="dskModel" type="text" value="deepseek-v4-flash" style="flex:1;min-width:0;"></div>
-      </div>
-      <div class="ai-provider-card" data-p="zhipu">
-        <label class="ap-head"><input type="radio" name="aiProvider" value="zhipu"> 智谱 GLM（永久免费）<span class="ap-code">zhipu</span></label>
-        <div class="cfg-row"><span class="cfg-label">API Key</span><input id="zhipuKey" type="password" placeholder="sk-..." style="flex:1;min-width:0;"></div>
-        <div class="cfg-row"><span class="cfg-label">Base URL</span><input id="zhipuBase" type="text" value="https://open.bigmodel.cn/api/paas/v4" style="flex:1;min-width:0;"></div>
-        <div class="cfg-row"><span class="cfg-label">Model</span><input id="zhipuModel" type="text" value="glm-4.7-flash" style="flex:1;min-width:0;"></div>
-      </div>
-      <div class="cfg-row"><span class="cfg-label">画面识别</span><label class="switch" style="flex:1;"><input type="checkbox" id="aiVisionOn"> 答疑时附当前屏幕画面（智谱视觉模型看图回答，免费）</label></div>
-      <div class="cfg-row"><span class="cfg-label">视觉模型</span><input id="aiVisionModel" type="text" value="glm-4.6v-flash" style="flex:1;min-width:0;"></div>
-      <div class="ai-provider-card" data-p="silicon">
-        <label class="ap-head"><input type="radio" name="aiProvider" value="silicon"> 硅基流动（2000万token）<span class="ap-code">silicon</span></label>
-        <div class="cfg-row"><span class="cfg-label">API Key</span><input id="siliconKey" type="password" placeholder="sk-..." style="flex:1;min-width:0;"></div>
-        <div class="cfg-row"><span class="cfg-label">Base URL</span><input id="siliconBase" type="text" value="https://api.siliconflow.cn/v1" style="flex:1;min-width:0;"></div>
-        <div class="cfg-row"><span class="cfg-label">Model</span><input id="siliconModel" type="text" value="deepseek-ai/DeepSeek-V3.1" style="flex:1;min-width:0;"></div>
-      </div>
-      <div class="ai-provider-card" data-p="sensenova">
-        <label class="ap-head"><input type="radio" name="aiProvider" value="sensenova"> 商汤 SenseNova（日日新）<span class="ap-code">sensenova</span></label>
-        <div class="cfg-row"><span class="cfg-label">API Key</span><input id="sensenovaKey" type="password" placeholder="platform.sensenova.cn 控制台获取" style="flex:1;min-width:0;"></div>
-        <div class="cfg-row"><span class="cfg-label">Base URL</span><input id="sensenovaBase" type="text" value="https://token.sensenova.cn/v1" style="flex:1;min-width:0;"></div>
-        <div class="cfg-row"><span class="cfg-label">Model</span><input id="sensenovaModel" type="text" value="sensenova-6.7-flash-lite" style="flex:1;min-width:0;"></div>
-        <div class="cfg-row"><span class="cfg-label">视觉模型</span><input id="sensenovaVisionModel" type="text" placeholder="AI 智能决策降级用，如 sensenova-6.8-flash-lite；留空则用上方 Model" style="flex:1;min-width:0;"></div>
-      </div>
+      <div class="cfg-row"><span class="cfg-label">使用模型</span><select id="aiModelSel" style="flex:1;min-width:0;"></select></div>
+      <p class="sub" style="font-size:11px;color:#6b7a99;margin:-4px 0 8px;">模型来自「🧩 模型配置」页，先在模型配置里填好 Key 与模型，这里直接选。</p>
+      <div class="cfg-row"><span class="cfg-label">画面识别</span><label class="switch" style="flex:1;"><input type="checkbox" id="aiVisionOn"> 答疑时附当前屏幕画面（用所选模型的视觉模型看图回答）</label></div>
       <div class="field"><span class="label">主播描述 / 产品话术</span>
         <textarea id="aiPrompt" rows="3">我是一个小游戏主播，我现在玩的游戏是我要动个脑，如果有用户问玩的什么游戏，请替我回答，只回答用户的提问，其他弹幕不用回答，如果用户问什么游戏，用不同的风格去回复用户，字数在15个字左右</textarea></div>
       <div class="field"><span class="label">过滤关键词（分号分隔，弹幕含这些词不触发AI答疑）</span>
@@ -462,8 +473,6 @@
         <div class="cfg-col" style="flex:1;"><span class="cfg-label">冷却秒数</span><input type="number" id="aiCool" value="10" min="0"></div>
         <div class="cfg-col" style="flex:1;"><span class="cfg-label">失败重试次数</span><input type="number" id="aiRetry" value="2" min="0"></div>
       </div>
-      <div class="cfg-row"><span class="cfg-label">自动降级</span><label class="switch" style="flex:1;"><input type="checkbox" id="aiFallback"> 当前平台失败时自动切换其他已填Key的平台（可能产生费用）</label></div>
-      <div class="cfg-row"><span class="cfg-label">降级顺序</span><input type="text" id="aiFallOrder" placeholder="dsk,zhipu,silicon（空=默认 DeepSeek→智谱→硅基）" style="flex:1;min-width:0;"></div>
       <div class="field"><span class="label">测试问答</span>
         <div class="row" style="gap:8px;align-items:center;">
           <input type="text" id="aiTestQ" placeholder="这是什么游戏啊？" style="flex:1;">
@@ -477,6 +486,39 @@
       <div id="aiLog" style="height:180px;overflow-y:auto;background:#0f1020;border:1px solid #2a2d52;border-radius:10px;padding:10px;font-size:12px;color:#9aa0c8;">等待弹幕问题...</div>
     </div>
     </div>
+    </div>
+
+    <!-- 模型配置页 -->
+    <div id="viewModel" style="display:none;padding:26px 28px 20px;width:100%;">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;max-width:760px;gap:16px;">
+        <div>
+          <h2 style="font-size:18px;margin-bottom:6px;">🧩 模型配置</h2>
+          <p class="sub" style="font-size:12px;color:#9aa0c8;margin-bottom:18px;line-height:1.6;">填入各提供商的 API 密钥即可使用其模型。这里配置的模型会出现在「AI 智能决策」的文本/视觉模型下拉框里。</p>
+        </div>
+        <button class="md-btn" id="mdOpenCfg" style="flex:none;margin-top:2px;">打开配置文件</button>
+      </div>
+      <div id="mdList" style="max-width:760px;"></div>
+
+      <div class="md-newbox" style="max-width:760px;">
+        <div class="md-newtitle">自定义模型 API</div>
+        <p class="md-newsub">连接中转站、自部署服务或其他兼容 OpenAI 协议的接口，需填写 API 地址、密钥和模型名。</p>
+        <div class="md-form">
+          <div class="md-f"><label>Provider ID</label><input id="mdNewId" placeholder="acme-gateway"><span class="md-tip">以小写字母开头的唯一标识</span></div>
+          <div class="md-f"><label>显示名称</label><input id="mdNewLabel" placeholder="显示名称"></div>
+          <div class="md-f"><label>API 地址</label><input id="mdNewBase" placeholder="https://api.example.com/v1"></div>
+          <div class="md-f"><label>API Key</label><input id="mdNewKey" type="password" placeholder="sk-..."></div>
+          <div class="md-f"><label>&nbsp;</label><button class="md-btn" id="mdFetch" style="width:100%;">🔄 自动获取模型</button><span class="md-tip">填好 API 地址和 Key 后点击，自动拉取并区分文本/视觉</span></div>
+          <div class="md-f md-span2"><label>可用模型（勾选要启用的，点击后自动填入下方）</label>
+            <div id="mdPick" class="md-pick"><div class="md-pick-empty">点击上方「自动获取模型」拉取列表</div></div>
+          </div>
+          <div class="md-f"><label>文本模型</label><input id="mdNewText" placeholder="多个用逗号分隔"></div>
+          <div class="md-f"><label>视觉模型</label><input id="mdNewVision" placeholder="多个用逗号分隔，可留空"></div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;margin-top:14px;">
+          <button class="md-btn primary" id="mdAdd">添加提供商</button>
+          <span id="mdMsg" style="font-size:12px;color:#9aa0c8;"></span>
+        </div>
+      </div>
     </div>
 
     <!-- 声音设备设置页 -->
@@ -597,19 +639,23 @@
     document.getElementById('navLibrary').classList.toggle('active', active === 'lib');
     document.getElementById('navAI').classList.toggle('active', active === 'ai');
     document.getElementById('navDanmaku').classList.toggle('active', active === 'dm');
+    document.getElementById('navModel').classList.toggle('active', active === 'md');
     document.getElementById('navVoice').classList.toggle('active', active === 'vc');
     document.getElementById('navDevice').classList.toggle('active', active === 'dev');
     document.getElementById('viewLibrary').style.display = active === 'lib' ? '' : 'none';
     document.getElementById('viewAI').style.display = active === 'ai' ? '' : 'none';
     document.getElementById('viewDanmaku').style.display = active === 'dm' ? 'flex' : 'none';
+    document.getElementById('viewModel').style.display = active === 'md' ? 'block' : 'none';
     document.getElementById('viewVoice').style.display = active === 'vc' ? 'flex' : 'none';
     document.getElementById('viewDevice').style.display = active === 'dev' ? 'block' : 'none';
+    if (active === 'md') mdLoad();
     if (active === 'vc') loadVoices();
     if (active === 'dev') loadDevices();
   }
   document.getElementById('navLibrary').onclick = () => setNav('lib');
   document.getElementById('navAI').onclick = () => setNav('ai');
   document.getElementById('navDanmaku').onclick = () => setNav('dm');
+  document.getElementById('navModel').onclick = () => setNav('md');
   document.getElementById('navVoice').onclick = () => setNav('vc');
   document.getElementById('navDevice').onclick = () => setNav('dev');
   function openEdit(g) { openModal('编辑游戏', g); }
@@ -1496,30 +1542,11 @@
   let aiBusy = false;
   function saveAICfg(){
     const d = {
-      provider: (document.querySelector('input[name="aiProvider"]:checked') || {}).value || 'zhipu',
-      dskKey: document.getElementById('dskKey').value,
-      dskBase: document.getElementById('dskBase').value,
-      dskModel: document.getElementById('dskModel').value,
-      zhipuKey: document.getElementById('zhipuKey').value,
-      zhipuBase: document.getElementById('zhipuBase').value,
-      zhipuModel: document.getElementById('zhipuModel').value,
-      siliconKey: document.getElementById('siliconKey').value,
-      siliconBase: document.getElementById('siliconBase').value,
-      siliconModel: document.getElementById('siliconModel').value,
-      sensenovaKey: document.getElementById('sensenovaKey').value,
-      sensenovaBase: document.getElementById('sensenovaBase').value,
-      sensenovaModel: document.getElementById('sensenovaModel').value,
-      sensenovaVisionModel: document.getElementById('sensenovaVisionModel').value,
-      qwenKey: document.getElementById('qwenKey').value,
-      baiduAk: document.getElementById('baiduAk').value,
-      baiduSk: document.getElementById('baiduSk').value,
-      visionModel: document.getElementById('aiVisionModel').value,
+      aiModelId: document.getElementById('aiModelSel').value || '',
       aiPrompt: document.getElementById('aiPrompt').value,
       aiFilter: document.getElementById('aiFilter').value,
       aiCool: document.getElementById('aiCool').value,
       aiRetry: document.getElementById('aiRetry').value,
-      aiFallback: document.getElementById('aiFallback').checked,
-      aiFallOrder: document.getElementById('aiFallOrder').value,
       aiOn: document.getElementById('aiOn').checked,
       aiVoice: document.getElementById('aiVoice').checked,
       aiText: document.getElementById('aiText').checked
@@ -1527,15 +1554,14 @@
     try { window.api.cfgSave({ aiChat: d }); } catch (e) {}
   }
   // 所有配置控件变更即自动保存到 JSON 文件
-  ['dskKey','dskBase','dskModel','zhipuKey','zhipuBase','zhipuModel','siliconKey','siliconBase','siliconModel','sensenovaKey','sensenovaBase','sensenovaModel','sensenovaVisionModel','qwenKey','baiduAk','baiduSk','aiVisionModel','aiPrompt','aiFilter','aiCool','aiRetry','aiFallOrder'].forEach(id => {
+  ['aiPrompt','aiFilter','aiCool','aiRetry'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('input', saveAICfg);
   });
-  ['aiFallback','aiOn','aiVoice','aiText'].forEach(id => {
+  ['aiModelSel','aiVisionOn','aiOn','aiVoice','aiText'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('change', saveAICfg);
   });
-  document.querySelectorAll('input[name="aiProvider"]').forEach(r => r.addEventListener('change', saveAICfg));
   function aiLog(msg){
     const box = document.getElementById('aiLog');
     const t = new Date().toLocaleTimeString('zh-CN',{hour12:false});
@@ -1547,63 +1573,69 @@
     el.className = 'ai-status' + (s==='ok' ? ' ok' : s==='fail' ? ' fail' : '');
     el.textContent = s==='ok' ? '● 已连接' : (s==='fail' ? '● 连接失败' : '● 未连接');
   }
+  // 解析「providerId:model」选择，从模型配置页的自定义提供商里取真实 key/base
+  async function resolveAiModel(){
+    const sel = document.getElementById('aiModelSel').value || '';
+    const m = /^([^:]+):(.+)$/.exec(sel);
+    if (!m) return null;
+    const pid = m[1], model = m[2];
+    let list = [];
+    try { list = await window.api.modelList(); } catch (e) { list = []; }
+    const cp = list.find(x => x.id === pid);
+    if (!cp || !String(cp.key || '').trim()) return null;
+    const vision = (document.getElementById('aiVisionOn').checked && String(cp.visionModel || '').trim())
+      ? cp.visionModel.split(/[,，]/).map(s => s.trim()).filter(Boolean)
+      : [];
+    return { pid, model, key: String(cp.key).trim(), base: String(cp.base || '').trim(), vision };
+  }
   async function aiAsk(question){
     if (aiBusy) return null;
     aiBusy = true;
     try {
       const sys = document.getElementById('aiPrompt').value.trim() || '你是直播间AI答疑助手，请口语化、简短地回答问题';
-      const providers = ['dsk', 'zhipu', 'silicon', 'sensenova'];
-      const pv0 = (document.querySelector('input[name="aiProvider"]:checked') || {}).value || 'dsk';
       const retry = Math.max(0, +document.getElementById('aiRetry').value || 0);
-      const fallback = document.getElementById('aiFallback').checked;
-      // 尝试顺序：当前平台优先；开启降级时按自定义顺序（或默认）追加其他已填 Key 的平台
-      const fallSeq = (document.getElementById('aiFallOrder').value || '').split(/[,，]/).map(s => s.trim()).filter(s => providers.includes(s));
-      const order = [pv0];
-      if (fallback) (fallSeq.length ? fallSeq : providers).filter(p => p !== pv0 && document.getElementById(p + 'Key').value.trim()).forEach(p => order.push(p));
-      let lastErr = '未知错误';
-      for (const p of order){
-        // 模型支持逗号分隔：按书写顺序逐个尝试，当前模型重试 retry 次，失败自动切下一个
-        let models = (document.getElementById(p + 'Model').value || '').split(/[,，]/).map(s => s.trim()).filter(Boolean);
-        if (!models.length) models = ['glm-4.7-flash'];
-        const useVision = p === 'zhipu' && document.getElementById('aiVisionOn').checked;
-        if (useVision) {
-          const vm = (document.getElementById('aiVisionModel').value || '').split(/[,，]/).map(s => s.trim()).filter(Boolean);
-          if (vm.length) models = vm;
-        }
-        for (const model of models){
-          for (let i = 0; i <= retry; i++){
-            try {
-              let userMsg = { role: 'user', content: question };
-              if (useVision) {
-                try {
-                  const cap = await window.api.screenCapture();
-                  if (cap && cap.ok && cap.dataUrl) {
-                    userMsg = { role: 'user', content: [
-                      { type: 'text', text: question },
-                      { type: 'image_url', image_url: { url: cap.dataUrl } }
-                    ] };
-                  }
-                } catch (e) { /* 截屏失败 → 降级纯文本提问 */ }
-              }
-              const r = await window.api.chatAI({
-                apiKey: document.getElementById(p + 'Key').value.trim(),
-                baseUrl: document.getElementById(p + 'Base').value.trim(),
-                model,
-                messages: [
-                  { role: 'system', content: sys },
-                  userMsg
-                ]
-              });
-              if (r && r.ok) { setAIStatus('ok'); return (r.text || '').trim(); }
-              lastErr = (r && r.error) || '未知错误';
-              setAIStatus('fail');
-            } catch(e){ lastErr = String((e && e.message) || e); setAIStatus('fail'); }
-            if (i < retry) await new Promise(res => setTimeout(res, 800)); // 重试间隔
-          }
-          aiLog('模型「' + model + '」失败，切换下一个…');
-        }
+      const conf = await resolveAiModel();
+      if (!conf) {
+        aiLog('未选择模型或未填该模型的 API Key（请先在「🧩 模型配置」里配置）');
+        setAIStatus('fail');
+        return null;
       }
-      aiLog('AI调用失败（重试' + retry + '次' + (fallback ? '/自动降级' : '') + '后仍失败）：' + lastErr);
+      let lastErr = '未知错误';
+      // 画面识别开启且所选模型有视觉模型 → 用视觉模型，否则用文本模型
+      const models = conf.vision.length ? conf.vision : [conf.model];
+      for (const model of models){
+        for (let i = 0; i <= retry; i++){
+          try {
+            let userMsg = { role: 'user', content: question };
+            if (conf.vision.length) {
+              try {
+                const cap = await window.api.screenCapture();
+                if (cap && cap.ok && cap.dataUrl) {
+                  userMsg = { role: 'user', content: [
+                    { type: 'text', text: question },
+                    { type: 'image_url', image_url: { url: cap.dataUrl } }
+                  ] };
+                }
+              } catch (e) { /* 截屏失败 → 降级纯文本提问 */ }
+            }
+            const r = await window.api.chatAI({
+              apiKey: conf.key,
+              baseUrl: conf.base,
+              model,
+              messages: [
+                { role: 'system', content: sys },
+                userMsg
+              ]
+            });
+            if (r && r.ok) { setAIStatus('ok'); return (r.text || '').trim(); }
+            lastErr = (r && r.error) || '未知错误';
+            setAIStatus('fail');
+          } catch(e){ lastErr = String((e && e.message) || e); setAIStatus('fail'); }
+          if (i < retry) await new Promise(res => setTimeout(res, 800)); // 重试间隔
+        }
+        aiLog('模型「' + model + '」失败，切换下一个…');
+      }
+      aiLog('AI调用失败（重试' + retry + '次后仍失败）：' + lastErr);
       return null;
     } catch(e){ setAIStatus('fail'); aiLog('AI异常：' + String((e && e.message) || e)); return null; }
     finally { aiBusy = false; }
@@ -1816,18 +1848,35 @@
 
   // ---- AI 配置：统一存到 config/client-config.json（localStorage 已废弃）----
   function aiPersist(){ saveAICfg(); } // 兼容旧调用：点测试等场景也落盘
+  // 把模型配置页的自定义提供商（仅填了 Key 的）列成「label: model」下拉选项
+  async function aiRefreshModels(){
+    const sel = document.getElementById('aiModelSel');
+    if (!sel) return;
+    let list = [];
+    try { list = await window.api.modelList(); } catch (e) { list = []; }
+    const opts = [];
+    for (const cp of list) {
+      if (!String(cp.key || '').trim()) continue; // 没填 Key 的不出现
+      const txt = (cp.textModel || '').split(/[,，]/).map(s => s.trim()).filter(Boolean);
+      for (const m of txt) opts.push({ value: cp.id + ':' + m, text: cp.label + ' · ' + m });
+      if (!txt.length) opts.push({ value: cp.id + ':', text: cp.label + ' · （未配文本模型）' });
+    }
+    const cur = sel.value;
+    sel.innerHTML = opts.length
+      ? opts.map(o => '<option value="' + mdEsc(o.value) + '">' + mdEsc(o.text) + '</option>').join('')
+      : '<option value="">（请先在「🧩 模型配置」填好 Key 与模型）</option>';
+    if (cur && [...sel.options].some(o => o.value === cur)) sel.value = cur;
+  }
   async function aiLoad(){
     try {
       const cfg = await window.api.cfgLoad();
       const d = (cfg && cfg.aiChat) || {};
-      ['dskKey','dskBase','dskModel','zhipuKey','zhipuBase','zhipuModel','siliconKey','siliconBase','siliconModel','sensenovaKey','sensenovaBase','sensenovaModel','sensenovaVisionModel','qwenKey','baiduAk','baiduSk'].forEach(k => { if (d[k] !== undefined) document.getElementById(k).value = d[k]; });
-      if (d.provider) { const r = document.querySelector('input[name="aiProvider"][value="' + d.provider + '"]'); if (r) r.checked = true; }
+      await aiRefreshModels();
+      if (d.aiModelId) document.getElementById('aiModelSel').value = d.aiModelId;
       if (d.aiPrompt !== undefined) document.getElementById('aiPrompt').value = d.aiPrompt;
       if (d.aiFilter !== undefined) document.getElementById('aiFilter').value = d.aiFilter;
       if (d.aiCool !== undefined) document.getElementById('aiCool').value = d.aiCool;
       if (d.aiRetry !== undefined) document.getElementById('aiRetry').value = d.aiRetry;
-      if (d.aiFallback !== undefined) document.getElementById('aiFallback').checked = d.aiFallback;
-      if (d.aiFallOrder !== undefined) document.getElementById('aiFallOrder').value = d.aiFallOrder;
       if (d.aiOn !== undefined) document.getElementById('aiOn').checked = d.aiOn;
       if (d.aiVoice !== undefined) document.getElementById('aiVoice').checked = d.aiVoice;
       if (d.aiText !== undefined) document.getElementById('aiText').checked = d.aiText;
@@ -1835,6 +1884,190 @@
   }
   document.getElementById('aiTest').addEventListener('click', aiPersist);
   aiLoad(); // JSON 配置恢复
+
+  // ---------- 模型配置页（独立管理所有提供商） ----------
+  let mdProviders = [];
+  const mdEsc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  async function mdLoad() {
+    try { mdProviders = await window.api.modelList(); } catch (e) { mdProviders = []; }
+    const box = document.getElementById('mdList');
+    if (!box) return;
+    if (!mdProviders.length) { box.innerHTML = '<div style="color:#9aa0c8;font-size:13px;">还没有提供商</div>'; return; }
+    box.innerHTML = mdProviders.map(p => {
+      const has = String(p.key || '').trim() !== '';
+      const models = [p.textModel ? ('文本: ' + p.textModel) : '', p.visionModel ? ('视觉: ' + p.visionModel) : ''].filter(Boolean).join('　｜　');
+      return '<div class="md-card" data-id="' + mdEsc(p.id) + '">' +
+        '<span class="md-dot' + (has ? ' on' : '') + '"></span>' +
+        '<div class="md-grow">' +
+          '<div class="md-name">' + mdEsc(p.label) + ' <span class="md-badge">' + mdEsc(p.id) + '</span></div>' +
+          '<div class="md-models" title="' + mdEsc(models || '未配置模型') + '">' + mdEsc(models || '未配置模型') + (has ? '' : '　·　未填 Key') + '</div>' +
+        '</div>' +
+        '<button class="md-btn" data-act="edit">编辑</button>' +
+        '<button class="md-btn danger" data-act="del">删除</button>' +
+        '<div class="md-edit" data-edit></div>' +
+      '</div>';
+    }).join('');
+    box.querySelectorAll('.md-card').forEach(card => {
+      const id = card.dataset.id;
+      const p = mdProviders.find(x => x.id === id);
+      if (!p) return;
+      card.querySelector('[data-act=edit]').onclick = () => {
+        const ed = card.querySelector('[data-edit]');
+        if (card.classList.contains('open')) { card.classList.remove('open'); return; }
+        card.classList.add('open');
+        // 展开后把编辑区滚进可视范围，避免看起来"没显示出来"
+        setTimeout(() => { try { card.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (e) {} }, 60);
+        ed.innerHTML =
+          '<div class="md-form">' +
+          '<div class="md-f"><label>Provider ID</label><input value="' + mdEsc(p.id) + '" disabled></div>' +
+          '<div class="md-f"><label>显示名称</label><input data-k="label" value="' + mdEsc(p.label) + '"></div>' +
+          '<div class="md-f"><label>API 地址</label><input data-k="base" value="' + mdEsc(p.base) + '" placeholder="https://..."></div>' +
+          '<div class="md-f"><label>API Key</label><input data-k="key" type="password" value="' + mdEsc(p.key) + '" placeholder="sk-..."></div>' +
+          '<div class="md-f"><label>&nbsp;</label><button class="md-btn" data-act="fetch" style="width:100%;">🔄 自动获取模型</button><span class="md-tip">填好地址和 Key 后点击，自动拉取并区分文本/视觉</span></div>' +
+          '<div class="md-f md-span2"><label>可用模型（勾选要启用的，点击后自动填入下方）</label>' +
+            '<div class="md-pick" data-pick><div class="md-pick-empty">点击上方「自动获取模型」拉取列表</div></div>' +
+          '</div>' +
+          '<div class="md-f"><label>文本模型</label><input data-k="textModel" value="' + mdEsc(p.textModel) + '" placeholder="多个用逗号分隔"></div>' +
+          '<div class="md-f"><label>视觉模型</label><input data-k="visionModel" value="' + mdEsc(p.visionModel) + '" placeholder="多个用逗号分隔，可留空"></div>' +
+          '</div>' +
+          '<div style="display:flex;gap:10px;align-items:center;margin-top:12px;">' +
+            '<button class="md-btn primary" data-act="save">保存</button>' +
+            '<button class="md-btn" data-act="cancel">取消</button>' +
+            '<span class="md-tip" data-msg style="margin:0;"></span>' +
+          '</div>';
+        ed.querySelector('[data-act=cancel]').onclick = () => card.classList.remove('open');
+        ed.querySelector('[data-act=fetch]').onclick = async () => {
+          const val = k => { const el = ed.querySelector('[data-k="' + k + '"]'); return el ? el.value : ''; };
+          const msgEl = ed.querySelector('[data-msg]');
+          const pick = ed.querySelector('[data-pick]');
+          const btn = ed.querySelector('[data-act=fetch]');
+          const base = val('base').trim(), key = val('key').trim();
+          if (!base) { msgEl.style.color = '#f87171'; msgEl.textContent = '请先填写 API 地址'; return; }
+          btn.disabled = true; btn.textContent = '🔄 获取中…';
+          msgEl.style.color = '#9aa0c8'; msgEl.textContent = '正在拉取模型列表…';
+          let r = null;
+          try { r = await window.api.modelFetchList({ base, key }); } catch (e) { r = { ok: false, error: String(e) }; }
+          btn.disabled = false; btn.textContent = '🔄 自动获取模型';
+          if (!r || !r.ok) { msgEl.style.color = '#f87171'; msgEl.textContent = '获取失败：' + ((r && r.error) || '未知错误'); return; }
+          if (!r.total) { msgEl.style.color = '#f87171'; msgEl.textContent = '该接口没有返回任何模型'; return; }
+          const saved = new Set(String(p.textModel || '').split(/[,，]/).map(s => s.trim()).filter(Boolean)
+            .concat(String(p.visionModel || '').split(/[,，]/).map(s => s.trim()).filter(Boolean)));
+          const rows = [];
+          (r.vision || []).forEach(m => rows.push(['vision', m]));
+          (r.text || []).forEach(m => rows.push(['text', m]));
+          // 接口返回的模型里没出现、但原先已配置的：合并进列表并标为「已存」，避免被清空
+          const listed = new Set(rows.map(x => x[1]));
+          const missing = Array.from(saved).filter(m => !listed.has(m));
+          missing.forEach(m => rows.push(['text', m]));
+          pick.innerHTML = rows.map(([kind, m]) => {
+            const isSaved = saved.has(m), isMissing = missing.indexOf(m) >= 0;
+            return '<label title="' + mdEsc(m) + '"><input type="checkbox" data-kind="' + kind + '" value="' + mdEsc(m) + '"' + (isSaved || isMissing ? ' checked' : '') + '>' +
+            '<span class="mk ' + (isMissing ? 's' : (kind === 'vision' ? 'v' : 't')) + '">' + (isMissing ? '已存' : (kind === 'vision' ? '视觉' : '文本')) + '</span>' +
+            '<span class="mn">' + mdEsc(m) + '</span></label>';
+          }).join('');
+          const sync = () => {
+            const sel = k => Array.from(pick.querySelectorAll('input[data-kind="' + k + '"]:checked')).map(i => i.value);
+            // 原「已存」的文本模型不在列表项里时也要保留
+            const keptText = Array.from(pick.querySelectorAll('input[data-kind="text"]:checked')).map(i => i.value);
+            ed.querySelector('[data-k="textModel"]').value = keptText.join(', ');
+            ed.querySelector('[data-k="visionModel"]').value = sel('vision').join(', ');
+          };
+          pick.querySelectorAll('input[type=checkbox]').forEach(cb => cb.onchange = sync);
+          if (!saved.size) {
+            pick.querySelectorAll('input[data-kind="vision"]').forEach(cb => cb.checked = true);
+            let n = 0;
+            pick.querySelectorAll('input[data-kind="text"]').forEach(cb => { if (n < 5) { cb.checked = true; n++; } });
+          }
+          sync();
+          const vn2 = (r.vision || []).length;
+          msgEl.style.color = '#22d39a';
+          msgEl.textContent = '共 ' + r.total + ' 个（视觉 ' + vn2 + ' / 文本 ' + (r.text || []).length + '）'
+            + (saved.size ? '，已保留你原先已配置的' : '，已默认勾选视觉全部 + 文本前 5 个') + '，可自行调整'
+            + (vn2 ? '' : '。⚠️ 该接口没返回视觉模型，视觉模型请在下方手动填写');
+        };
+        ed.querySelector('[data-act=save]').onclick = async () => {
+          const val = k => { const el = ed.querySelector('[data-k="' + k + '"]'); return el ? el.value : ''; };
+          const msgEl = ed.querySelector('[data-msg]');
+          const r = await window.api.modelSave({ id: p.id, label: val('label'), base: val('base'), key: val('key'), textModel: val('textModel'), visionModel: val('visionModel') });
+          if (r && r.ok) { msgEl.style.color = '#22d39a'; msgEl.textContent = '已保存'; aiRefreshModels(); await mdLoad(); }
+          else { msgEl.style.color = '#f87171'; msgEl.textContent = (r && r.error) || '保存失败'; }
+        };
+      };
+      card.querySelector('[data-act=del]').onclick = async () => {
+        if (!confirm('删除自定义提供商「' + p.label + '」？')) return;
+        await window.api.modelDelete(p.id);
+        aiRefreshModels();
+        await mdLoad();
+      };
+    });
+  }
+  // 「自动获取模型」：拉取 /models 并区分文本/视觉，勾选后自动填入下方两个输入框
+  const mdFetchBtn = document.getElementById('mdFetch');
+  if (mdFetchBtn) mdFetchBtn.onclick = async () => {
+    const g = id => { const el = document.getElementById(id); return el ? el.value : ''; };
+    const msg = document.getElementById('mdMsg');
+    const pick = document.getElementById('mdPick');
+    const base = g('mdNewBase').trim(), key = g('mdNewKey').trim();
+    if (!base) { msg.style.color = '#f87171'; msg.textContent = '请先填写 API 地址'; return; }
+    mdFetchBtn.disabled = true; mdFetchBtn.textContent = '🔄 获取中…';
+    msg.style.color = '#9aa0c8'; msg.textContent = '正在拉取模型列表…';
+    let r = null;
+    try { r = await window.api.modelFetchList({ base, key }); } catch (e) { r = { ok: false, error: String(e) }; }
+    mdFetchBtn.disabled = false; mdFetchBtn.textContent = '🔄 自动获取模型';
+    if (!r || !r.ok) {
+      msg.style.color = '#f87171'; msg.textContent = '获取失败：' + ((r && r.error) || '未知错误');
+      return;
+    }
+    if (!r.total) { msg.style.color = '#f87171'; msg.textContent = '该接口没有返回任何模型'; return; }
+    const rows = [];
+    (r.vision || []).forEach(m => rows.push(['vision', m]));
+    (r.text || []).forEach(m => rows.push(['text', m]));
+    pick.innerHTML = rows.map(([kind, m]) =>
+      '<label title="' + mdEsc(m) + '"><input type="checkbox" data-kind="' + kind + '" value="' + mdEsc(m) + '">' +
+      '<span class="mk ' + (kind === 'vision' ? 'v' : 't') + '">' + (kind === 'vision' ? '视觉' : '文本') + '</span>' +
+      '<span class="mn">' + mdEsc(m) + '</span></label>'
+    ).join('');
+    const sync = () => {
+      const sel = k => Array.from(pick.querySelectorAll('input[data-kind="' + k + '"]:checked')).map(i => i.value);
+      document.getElementById('mdNewText').value = sel('text').join(', ');
+      document.getElementById('mdNewVision').value = sel('vision').join(', ');
+    };
+    pick.querySelectorAll('input[type=checkbox]').forEach(cb => cb.onchange = sync);
+    // 默认帮用户勾上：视觉模型全选，文本模型最多 5 个，避免一次填太多
+    pick.querySelectorAll('input[data-kind="vision"]').forEach(cb => cb.checked = true);
+    let n = 0;
+    pick.querySelectorAll('input[data-kind="text"]').forEach(cb => { if (n < 5) { cb.checked = true; n++; } });
+    sync();
+    const vn = (r.vision || []).length;
+    msg.style.color = '#22d39a';
+    msg.textContent = '共 ' + r.total + ' 个模型（视觉 ' + vn + ' / 文本 ' + (r.text || []).length + '），已默认勾选视觉全部 + 文本前 5 个，可自行调整'
+      + (vn ? '' : '。⚠️ 该接口没返回任何视觉模型（部分平台如智谱的 /models 只列文本模型），视觉模型请在下方手动填写');
+  };
+  const mdOpenBtn = document.getElementById('mdOpenCfg');
+  if (mdOpenBtn) mdOpenBtn.onclick = () => { try { window.api.openConfigFile(); } catch (e) {} };
+  const mdAddBtn = document.getElementById('mdAdd');
+  if (mdAddBtn) mdAddBtn.onclick = async () => {
+    const g = id => { const el = document.getElementById(id); return el ? el.value : ''; };
+    const msg = document.getElementById('mdMsg');
+    const id = g('mdNewId').trim();
+    const bad = m => { msg.style.color = '#f87171'; msg.textContent = m; };
+    if (!/^[a-z][a-z0-9_-]{1,30}$/.test(id)) return bad('Provider ID 需以小写字母开头，2-31 位，只含小写字母/数字/-/_');
+    if (mdProviders.some(p => p.id === id)) return bad('Provider ID「' + id + '」已存在');
+    const textModel = g('mdNewText').trim(), visionModel = g('mdNewVision').trim();
+    const r = await window.api.modelSave({ id, label: g('mdNewLabel').trim() || id, base: g('mdNewBase').trim(), key: g('mdNewKey'), textModel, visionModel });
+    if (r && r.ok) {
+      // 添加成功后，把「自定义模型 API」整个表单初始化：标识/密钥/文本/视觉全部清空，可用模型(picker)回到"点击自动获取"初始态
+      ['mdNewId', 'mdNewLabel', 'mdNewBase', 'mdNewKey', 'mdNewText', 'mdNewVision'].forEach(k => { const el = document.getElementById(k); if (el) el.value = ''; });
+      const pick = document.getElementById('mdPick');
+      if (pick) pick.innerHTML = '<div class="md-pick-empty">点击上方「自动获取模型」拉取列表</div>';
+      const tc = textModel ? String(textModel).split(/[,，]/).filter(Boolean).length : 0;
+      const vc = visionModel ? String(visionModel).split(/[,，]/).filter(Boolean).length : 0;
+      msg.style.color = '#22d39a';
+      msg.textContent = '已添加「' + id + '」✓ 已保存 文本 ' + tc + ' / 视觉 ' + vc + ' 个模型（表单已重置，可继续添加下一个）';
+      aiRefreshModels();
+      await mdLoad();
+    } else bad((r && r.error) || '添加失败');
+  };
 
   // ---------- 声音克隆（音色库） ----------
   let vcAudioEl = null;

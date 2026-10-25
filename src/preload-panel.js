@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('panel', {
   aiStart: (cfg) => ipcRenderer.send('aiAgent:start', cfg),
   aiStop: () => ipcRenderer.send('aiAgent:stop'),
   aiState: () => ipcRenderer.invoke('aiAgent:state'),
+  aiModels: () => ipcRenderer.invoke('aiAgent:models'),
   capture: () => ipcRenderer.send('tpl:capture'),
   setOption: (patch) => ipcRenderer.send('option:set', patch),
   getOption: () => ipcRenderer.invoke('option:get'),

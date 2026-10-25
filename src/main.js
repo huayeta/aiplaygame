@@ -221,6 +221,7 @@ function createLibrary() {
       }
       return JSON.stringify(out);
     })()`).then(s => console.log('[dom-tree] ' + s)).catch(e => console.log('[dom-tree-err] ' + e));
+
   });
   libraryWin.on('closed', () => { libraryWin = null; });
 }
@@ -419,12 +420,12 @@ ipcMain.handle('ai:tts', async (e, opts) => {
     const outPath = path.join(dir, 'tts.mp3');
     const txtPath = path.join(dir, 'text.txt');
     fs.writeFileSync(txtPath, text, 'utf8');
-    const py = process.env.EDGE_TTS_PYTHON || 'D:\\Python310\\python.exe';
+    const py = process.env.EDGE_TTS_PYTHON || 'python3';
     const synthOk = await new Promise((resolve) => {
       execFile(py, ['-m', 'edge_tts', '--voice', voice, '--rate=' + rateStr, '--file', txtPath, '--write-media', outPath],
         { timeout: 60000, windowsHide: true }, (err) => resolve(!err && fs.existsSync(outPath)));
     });
-    if (!synthOk) return { ok: false, err: 'edge-tts 云端合成失败（可改用本地 GPT-SoVITS 引擎，或检查 Python edge-tts 是否安装）' };
+    if (!synthOk) return { ok: false, err: 'edge-tts 云端合成失败（请确认已安装 edge-tts：pip install -U edge-tts；并设置 EDGE_TTS_PYTHON 指向可用的 python3，可改用本地 GPT-SoVITS 引擎）' };
     return { ok: true, url: pathToFileURL(outPath).href };
   } catch (err) {
     return { ok: false, err: String((err && err.message) || err) };
@@ -1146,32 +1147,72 @@ const CONFIG_PATH = path.join(CONFIG_DIR, 'client-config.json');
 const DEFAULT_CONFIG = {
   version: 1,
   aiChat: {
-    provider: 'zhipu',
-    dskKey: '', dskBase: 'https://api.deepseek.com', dskModel: 'deepseek-v4-flash',
-    zhipuKey: '', zhipuBase: 'https://open.bigmodel.cn/api/paas/v4', zhipuModel: 'glm-4.7-flash',
-    siliconKey: '', siliconBase: '', siliconModel: '',
-    sensenovaKey: '', sensenovaBase: 'https://token.sensenova.cn/v1', sensenovaModel: 'sensenova-6.7-flash-lite', sensenovaVisionModel: '',
     qwenKey: '', qwenModel: 'qwen3-tts-flash',
     baiduAk: '', baiduSk: '',
-    visionModel: 'glm-4.6v-flash',
     aiPrompt: '我是一个小游戏主播，我现在玩的游戏是我要动个脑，如果有用户问玩的什么游戏，请替我回答，只回答用户的提问，其他弹幕不用回答，如果用户问什么游戏，用不同的风格去回复用户，字数在15个字左右',
     aiFilter: '', aiCool: '', aiRetry: '', aiFallback: true, aiFallOrder: '',
-    aiOn: false, aiVoice: false, aiText: false
+    aiOn: false, aiVoice: false, aiText: false,
+    customProviders: [] // 所有提供商统一为自定义：{id,label,base,key,textModel,visionModel}
   }
 };
 let clientConfig = null;
+// 旧版内置 4 家字段 → 统一迁移为 customProviders 自定义配置
+const LEGACY_BUILTIN = [
+  { id: 'dsk', label: 'DeepSeek', keyField: 'dskKey', baseField: 'dskBase', textField: 'dskModel', visionField: null, defBase: 'https://api.deepseek.com', defText: 'deepseek-v4-flash', defVision: null },
+  { id: 'zhipu', label: '智谱 GLM', keyField: 'zhipuKey', baseField: 'zhipuBase', textField: 'zhipuModel', visionField: 'visionModel', defBase: 'https://open.bigmodel.cn/api/paas/v4', defText: 'glm-4.7-flash', defVision: 'glm-4.6v-flash' },
+  { id: 'silicon', label: '硅基流动', keyField: 'siliconKey', baseField: 'siliconBase', textField: 'siliconModel', visionField: null, defBase: 'https://api.siliconflow.cn/v1', defText: '', defVision: null },
+  { id: 'sensenova', label: '商汤 SenseNova', keyField: 'sensenovaKey', baseField: 'sensenovaBase', textField: 'sensenovaModel', visionField: 'sensenovaVisionModel', defBase: 'https://token.sensenova.cn/v1', defText: 'sensenova-6.7-flash-lite', defVision: null }
+];
+// 首次无配置时预置的 4 个空自定义卡片（带好默认 base，用户直接填 Key 即可）
+const DEFAULT_CUSTOM_PROVIDERS = [
+  { id: 'dsk', label: 'DeepSeek', base: 'https://api.deepseek.com', key: '', textModel: 'deepseek-v4-flash', visionModel: '' },
+  { id: 'zhipu', label: '智谱 GLM', base: 'https://open.bigmodel.cn/api/paas/v4', key: '', textModel: 'glm-4.7-flash', visionModel: 'glm-4.6v-flash' },
+  { id: 'silicon', label: '硅基流动', base: 'https://api.siliconflow.cn/v1', key: '', textModel: '', visionModel: '' },
+  { id: 'sensenova', label: '商汤 SenseNova', base: 'https://token.sensenova.cn/v1', key: '', textModel: 'sensenova-6.7-flash-lite', visionModel: '' }
+];
+function migrateBuiltinToCustom(aiChat) {
+  if (!aiChat || typeof aiChat !== 'object') return aiChat;
+  const list = Array.isArray(aiChat.customProviders) ? aiChat.customProviders.slice() : [];
+  const have = new Set(list.map(x => x && x.id));
+  for (const b of LEGACY_BUILTIN) {
+    const key = String(aiChat[b.keyField] || '').trim();
+    if (!key) continue; // 没填过 Key 的旧内置家，跳过（首次会由默认卡片补上）
+    if (have.has(b.id)) continue; // 已存在于自定义，不重复
+    have.add(b.id);
+    list.push({
+      id: b.id, label: b.label,
+      base: String(aiChat[b.baseField] || b.defBase || '').trim(),
+      key: key,
+      textModel: String(aiChat[b.textField] || b.defText || '').trim(),
+      visionModel: b.visionField ? String(aiChat[b.visionField] || b.defVision || '').trim() : ''
+    });
+  }
+  aiChat.customProviders = list;
+  // 清理旧字段，避免混淆
+  for (const b of LEGACY_BUILTIN) { delete aiChat[b.keyField]; delete aiChat[b.baseField]; delete aiChat[b.textField]; if (b.visionField) delete aiChat[b.visionField]; }
+  delete aiChat.provider;
+  return aiChat;
+}
 function loadClientConfig(){
+  let fromFile = false;
   try {
     if (fs.existsSync(CONFIG_PATH)) {
       const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
       clientConfig = { version: 1, aiChat: Object.assign({}, DEFAULT_CONFIG.aiChat, (raw.aiChat || {})) };
+      fromFile = true;
     } else {
       clientConfig = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
-      try { fs.mkdirSync(CONFIG_DIR, { recursive: true }); fs.writeFileSync(CONFIG_PATH, JSON.stringify(clientConfig, null, 2), 'utf8'); } catch (e) {}
     }
   } catch (e) {
     clientConfig = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
   }
+  // 迁移 + 默认预置
+  clientConfig.aiChat = migrateBuiltinToCustom(clientConfig.aiChat);
+  if (!Array.isArray(clientConfig.aiChat.customProviders) || clientConfig.aiChat.customProviders.length === 0) {
+    clientConfig.aiChat.customProviders = JSON.parse(JSON.stringify(DEFAULT_CUSTOM_PROVIDERS));
+  }
+  if (fromFile) { try { fs.writeFileSync(CONFIG_PATH, JSON.stringify(clientConfig, null, 2), 'utf8'); } catch (e) {} }
+  else { try { fs.mkdirSync(CONFIG_DIR, { recursive: true }); fs.writeFileSync(CONFIG_PATH, JSON.stringify(clientConfig, null, 2), 'utf8'); } catch (e) {} }
   return clientConfig;
 }
 function saveClientConfig(patch){
@@ -1267,13 +1308,27 @@ async function aiChatOnce(conf, imgB64, system, history, hintText) {
       max_tokens: 600, temperature: 0.3
     };
     if (/^glm/i.test(conf.model)) body.thinking = { type: 'disabled' }; // 智谱混合思考模型关闭思考，content 直接给正式回答
-    const r = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + conf.key },
-      body: JSON.stringify(body)
-    });
-    const j = await r.json().catch(() => null);
-    if (!r.ok) return { ok: false, error: (j && j.error && j.error.message) || ('HTTP ' + r.status) };
+    const send = async () => {
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + conf.key },
+        body: JSON.stringify(body)
+      });
+      const j = await r.json().catch(() => null);
+      return { r, j };
+    };
+    let { r, j } = await send();
+    if (!r.ok) {
+      const em = String((j && j.error && (j.error.message || j.error.code)) || '');
+      // 部分模型（如商汤 kimi-k3）只接受 temperature=1：命中该提示就以 temperature=1 重试一次
+      if (/temperature/i.test(em) && body.temperature !== 1) {
+        body.temperature = 1;
+        ({ r, j } = await send());
+        if (!r.ok) return { ok: false, error: (j && j.error && (j.error.message || j.error.code)) || ('HTTP ' + r.status) };
+      } else {
+        return { ok: false, error: em || ('HTTP ' + r.status) };
+      }
+    }
     const msg = (j && j.choices && j.choices[0] && j.choices[0].message) || {};
     let text = msg.content;
     if (text == null || text === '') text = msg.reasoning_content;
@@ -1286,19 +1341,25 @@ async function aiChatOnce(conf, imgB64, system, history, hintText) {
 // 模型池逐级降级：智谱(主)视觉模型列表 → 商汤(降级)视觉模型列表；每个模型重试 N 次，失败自动切换下一个
 // 配置支持逗号分隔（如 visionModel: "glm-4.6v-flash, glm-4.5v"），按书写顺序逐个尝试
 function modelList(v) { return String(v || '').split(/[,，]/).map(s => s.trim()).filter(Boolean); }
-async function aiVisionAsk(imgB64, system, history, hintText) {
+// 构建可用视觉模型池：遍历所有已填 Key 的自定义提供商，按列表顺序组成降级链；每项带 provider 供面板选择时定位用哪个 Key/Base
+function buildVisionPool() {
+  const a = (clientConfig && clientConfig.aiChat) || {};
+  const pool = [];
+  for (const cp of (Array.isArray(a.customProviders) ? a.customProviders : [])) {
+    if (!cp || !String(cp.key || '').trim()) continue;
+    for (const m of modelList(cp.visionModel)) pool.push({ provider: cp.id, key: String(cp.key).trim(), base: String(cp.base || '').trim(), model: m, tag: cp.label || cp.id });
+  }
+  return pool;
+}
+// pick = {provider, model}：指定模型时只用它（不降级）；不传或 'auto' 时走完整降级链路
+async function aiVisionAsk(imgB64, system, history, hintText, pick) {
   const a = (clientConfig && clientConfig.aiChat) || {};
   const retry = Math.max(1, Math.min(5, Number(a.aiRetry) || 3));
   const gap = 2000;
-  const pool = [];
-  if (String(a.zhipuKey || '').trim()) {
-    const models = modelList(a.visionModel).length ? modelList(a.visionModel) : ['glm-4.6v-flash'];
-    for (const m of models) pool.push({ key: String(a.zhipuKey).trim(), base: String(a.zhipuBase || 'https://open.bigmodel.cn/api/paas/v4').trim(), model: m, tag: '智谱' });
-  }
-  if (String(a.sensenovaKey || '').trim()) {
-    const models = modelList(a.sensenovaVisionModel).length ? modelList(a.sensenovaVisionModel) : modelList(a.sensenovaModel);
-    const ms = models.length ? models : ['sensenova-6.8-flash-lite'];
-    for (const m of ms) pool.push({ key: String(a.sensenovaKey).trim(), base: String(a.sensenovaBase || 'https://token.sensenova.cn/v1').trim(), model: m, tag: '商汤' });
+  let pool = buildVisionPool();
+  if (pick && pick.provider && pick.model) {
+    pool = pool.filter(p => p.provider === pick.provider && p.model === pick.model);
+    if (!pool.length) return { ok: false, error: '所选模型未配置 Key 或不可用' };
   }
   if (!pool.length) return { ok: false, error: '未配置视觉模型 Key（需智谱或商汤任一）' };
   let lastErr = '未知错误';
@@ -1314,24 +1375,117 @@ async function aiVisionAsk(imgB64, system, history, hintText) {
   }
   return { ok: false, error: '全部视觉模型调用失败：' + lastErr };
 }
+// 文本模型池：遍历所有已填 Key 的自定义提供商，按列表顺序组成降级链
+function buildTextPool() {
+  const a = (clientConfig && clientConfig.aiChat) || {};
+  const pool = [];
+  for (const cp of (Array.isArray(a.customProviders) ? a.customProviders : [])) {
+    if (!cp || !String(cp.key || '').trim()) continue;
+    for (const m of modelList(cp.textModel)) pool.push({ provider: cp.id, tag: cp.label || cp.id, key: String(cp.key).trim(), base: String(cp.base || '').trim(), model: m });
+  }
+  return pool;
+}
+// 纯文本调用（不带图）
+async function aiTextOnce(conf, system, user) {
+  try {
+    const url = conf.base.replace(/\/+$/, '') + '/chat/completions';
+    const body = {
+      model: conf.model,
+      messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+      max_tokens: 500, temperature: 0.3
+    };
+    if (/^glm/i.test(conf.model)) body.thinking = { type: 'disabled' };
+    const send = async () => {
+      const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + conf.key }, body: JSON.stringify(body) });
+      const j = await r.json().catch(() => null);
+      return { r, j };
+    };
+    let { r, j } = await send();
+    if (!r.ok) {
+      const em = String((j && j.error && (j.error.message || j.error.code)) || '');
+      if (/temperature/i.test(em) && body.temperature !== 1) {
+        body.temperature = 1;
+        ({ r, j } = await send());
+        if (!r.ok) return { ok: false, error: (j && j.error && (j.error.message || j.error.code)) || ('HTTP ' + r.status) };
+      } else return { ok: false, error: em || ('HTTP ' + r.status) };
+    }
+    const msg = (j && j.choices && j.choices[0] && j.choices[0].message) || {};
+    let text = msg.content;
+    if (text == null || text === '') text = msg.reasoning_content;
+    if (Array.isArray(text)) text = text.map(p => (p && (p.text || p.content)) || '').join('');
+    text = String(text || '').trim();
+    if (!text) return { ok: false, error: '模型返回空内容' };
+    return { ok: true, text };
+  } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
+}
+// 文本模型调用：pick 指定则只用它（不降级），否则按池顺序降级
+async function aiTextAsk(system, user, pick) {
+  const a = (clientConfig && clientConfig.aiChat) || {};
+  const retry = Math.max(1, Math.min(5, Number(a.aiRetry) || 3));
+  let pool = buildTextPool();
+  if (pick && pick.provider && pick.model) {
+    pool = pool.filter(p => p.provider === pick.provider && p.model === pick.model);
+    if (!pool.length) return { ok: false, error: '所选文本模型未配置 Key' };
+  }
+  if (!pool.length) return { ok: false, error: '未配置文本模型 Key' };
+  let lastErr = '未知错误';
+  for (const item of pool) {
+    for (let i = 1; i <= retry; i++) {
+      const r = await aiTextOnce({ key: item.key, base: item.base, model: item.model }, system, user);
+      if (r.ok) return Object.assign(r, { used: item.tag + ' ' + item.model });
+      lastErr = r.error;
+      if (i < retry) await sleep(1500);
+    }
+  }
+  return { ok: false, error: '全部文本模型调用失败：' + lastErr };
+}
 // AI 决策循环：每轮截图→模型出动作→执行→再截图
 async function aiAgentLoop(cfg) {
   const game = readGames().find(g => g.id === auto.gameId);
   const rules = String((game && game.rules) || '').trim();
   const goal = String((cfg && cfg.text) || '').trim();
-  const system =
-    '你是H5小游戏自动操作员。游戏窗口尺寸 414x736，坐标用 0~1 相对比例（左上角为0,0）。' +
-    (rules ? '\n[游戏规则]\n' + rules : '') +
-    '\n[当前任务]\n' + (goal || '自动游玩并尽量通关') +
-    '\n每轮我会发一张当前游戏截图。你看画面判断并输出下一步，只输出一个JSON：' +
-    '{"reasoning":"你看到的画面一句话","actions":[{"type":"tap","x":0~1,"y":0~1}|{"type":"wait","ms":500}|{"type":"restart"}],"done":false}。' +
-    '约束：一次最多3个动作；tap坐标必须在0~1；wait用于等待动画/加载/画面变化；restart表示重新开始本局；done=true表示已通关或无法继续（会自动停止）。禁止输出JSON以外的任何文字。';
-  let history = [];
-  let stuck = 0;      // 画面连续无变化轮数
-  let lastSig = null;
+  // 单次任务检测：指令含「一次/一下」且非持续类 → 执行完第一次点击即强制停止
+  const oneShot = (/一次|一下|点一下|按一下/.test(goal)) && !(/一直|持续|循环|不断|自动过关|通关|重复|连续|多(次|下)/.test(goal));
+  // 面板可选模型：形如 "zhipu:glm-4.6v-flash"，'auto'/空 = 走自动降级链路
+  const parsePick = (id) => {
+    const s = String(id || '').trim();
+    if (!s || s === 'auto') return null;
+    const idx = s.indexOf(':');
+    if (idx < 0) return null;
+    return { provider: s.slice(0, idx), model: s.slice(idx + 1) };
+  };
+  const visionPick = parsePick((cfg && cfg.visionModel) || (cfg && cfg.model)); // 兼容旧的 cfg.model
+  const textPick = parsePick(cfg && cfg.textModel);
   aiAgent.playing = true;
   aiAgent.abort = false;
   aiAgent.note = '';
+  let plan = '';
+  // 启动前用文本模型做一次策略规划（失败不阻塞，继续用视觉流程）
+  try {
+    setStatus('AI 正在用文本模型规划策略…', { aiPlaying: true });
+    const pr = await aiTextAsk(
+      '你是H5小游戏攻略助手。根据任务和游戏规则，给出简洁、可执行的策略要点（最多3条，纯文本，不要JSON）。',
+      '任务：' + (goal || '自动游玩并尽量通关') + (rules ? '\n游戏规则：' + rules : '') + '\n请给出策略要点。',
+      textPick
+    );
+    if (pr.ok) { plan = String(pr.text).replace(/\s+/g, ' ').slice(0, 400); setStatus('策略规划（' + pr.used + '）：' + plan, { aiPlaying: true }); }
+    else setStatus('策略规划失败（' + pr.error + '），直接开始视觉决策', { aiPlaying: true });
+  } catch (e) { /* 规划失败不影响主流程 */ }
+  if (aiAgent.abort) { aiAgent.playing = false; setStatus('AI 智能决策已停止', { aiPlaying: false }); return; }
+  const system =
+    '你是H5小游戏自动操作员。游戏窗口尺寸 414x736，坐标用 0~1 相对比例（左上角为0,0）。' +
+    (rules ? '\n[游戏规则]\n' + rules : '') +
+    (plan ? '\n[策略规划]\n' + plan : '') +
+    '\n[当前任务]\n' + (goal || '自动游玩并尽量通关') +
+    (oneShot ? '\n[任务类型：单次动作] 只需找到目标执行1次tap后必须done=true立即停止。绝不要重复点击同一目标——即使画面看似没变化，你的点击也已生效（画面稳定是正常的），不要因此重复点击；宁可输出wait也不要多点。' : '') +
+    '\n每轮我会发一张当前游戏截图。你看画面判断并输出下一步，只输出一个JSON：' +
+    '{"reasoning":"你看到的画面一句话","actions":[{"type":"tap","x":0~1,"y":0~1}|{"type":"wait","ms":500}|{"type":"restart"}],"done":false}。' +
+    '约束：一次最多3个动作；tap坐标必须在0~1；wait用于等待动画/加载/画面变化；restart表示重新开始本局。' +
+    '何时done=true停止：①任务是某个具体单次动作（如“点数字3”“按开始按钮”“点击那个图标”）——只找该目标并点击一次，完成后立即done=true，绝不点击目标以外的任何无关元素，宁可wait也不要乱点；②持续类任务（如“自动过关”“一直点某处”“循环游玩”）——仅在已通关或确定无法继续时done=true。' +
+    '禁止输出JSON以外的任何文字。';
+  let history = [];
+  let stuck = 0;      // 画面连续无变化轮数
+  let lastSig = null;
   setStatus('AI 智能决策开始' + (rules ? '（已加载游戏规则）' : '（未填游戏规则，建议在游戏库编辑里填写）') + '：' + (goal || '自动游玩'), { aiPlaying: true });
   try {
     while (aiAgent.playing && !aiAgent.abort) {
@@ -1339,16 +1493,18 @@ async function aiAgentLoop(cfg) {
       const page = await gameWin.webContents.capturePage();
       const small = page.resize({ width: 414, height: 736 }); // 压小省 token/延迟
       const b64 = small.toJPEG(70).toString('base64');
-      // 卡住提示：连续多轮画面几乎没变 → 告诉模型换策略
+      // 卡住提示：连续多轮画面几乎没变 → 告诉模型换策略（单次任务不发，避免误导重复点击已生效的目标）
       let hint = '';
-      const sig = await signature();
-      if (lastSig && sig) {
-        const sim = similarity(lastSig, sig);
-        if (sim > 0.985) { stuck++; if (stuck >= 3) hint = '（提示：画面已连续' + stuck + '轮无明显变化，可能卡住了，请换策略、等待或 restart）'; }
-        else stuck = 0;
+      if (!oneShot) {
+        const sig = await signature();
+        if (lastSig && sig) {
+          const sim = similarity(lastSig, sig);
+          if (sim > 0.985) { stuck++; if (stuck >= 3) hint = '（提示：画面已连续' + stuck + '轮无明显变化，可能卡住了，请换策略、等待或 restart）'; }
+          else stuck = 0;
+        }
+        lastSig = sig;
       }
-      lastSig = sig;
-      const res = await aiVisionAsk(b64, system, history, hint ? '请看当前游戏画面' + hint : undefined);
+      const res = await aiVisionAsk(b64, system, history, hint ? '请看当前游戏画面' + hint : undefined, visionPick);
       if (!res.ok) {
         setStatus('视觉决策失败：' + res.error + '（本轮等待后重试）', { aiPlaying: true });
         await sleep(3000);
@@ -1362,13 +1518,20 @@ async function aiAgentLoop(cfg) {
       }
       const who = res.used || '视觉模型';
       setStatus('AI 看到：' + String(act.reasoning || act.note || '') + '（' + who + '）', { aiPlaying: true });
+      let tapped = false;
       for (const ac of act.actions.slice(0, 3)) {
         if (aiAgent.abort) break;
-        if (ac.type === 'tap') { await doTap(Number(ac.x), Number(ac.y)); await sleep(600); }
+        if (ac.type === 'tap') {
+          await doTap(Number(ac.x), Number(ac.y));
+          await sleep(600);
+          if (oneShot) { tapped = true; break; } // 单次任务：点完即停，不再执行后续动作
+        }
         else if (ac.type === 'wait') { await sleep(Math.max(200, Number(ac.ms) || 500)); }
         else if (ac.type === 'restart') { if (gameWin && !gameWin.isDestroyed()) gameWin.webContents.reload(); await sleep(1200); }
       }
       history = [{ role: 'assistant', content: res.text }]; // 轻量上下文：让模型记得自己上一步说了什么
+      // 单次任务代码层兜底：执行过一次 tap 即强制停止，不依赖模型 done 判定（模型常不遵守）
+      if (oneShot && tapped) { setStatus('AI 完成单次点击：' + String(act.reasoning || goal) + '（已点一次，停止）', { aiPlaying: false }); aiAgent.playing = false; break; }
       if (act.done) { setStatus('AI 判定结束：' + String(act.reasoning || '完成') + '（停止）', { aiPlaying: false }); aiAgent.playing = false; break; }
     }
   } catch (err) {
@@ -1384,7 +1547,85 @@ ipcMain.on('aiAgent:start', (e, cfg) => {
 });
 ipcMain.on('aiAgent:stop', () => { if (aiAgent.playing) { aiAgent.abort = true; setStatus('正在停止 AI 智能决策…', { aiPlaying: true }); } });
 ipcMain.handle('aiAgent:state', () => ({ playing: aiAgent.playing, note: aiAgent.note }));
-
+// 列出可选模型：auto(自动降级) + 各已配置 Key 的具体模型，文本/视觉分开返回
+ipcMain.handle('aiAgent:models', () => {
+  const build = (pool, autoLabel) => {
+    const items = [{ id: 'auto', label: autoLabel }];
+    pool.forEach(p => items.push({ id: p.provider + ':' + p.model, label: p.tag + ' ' + p.model }));
+    return { items, default: 'auto' };
+  };
+  const out = {
+    vision: build(buildVisionPool(), '自动（按模型配置页顺序降级）'),
+    text: build(buildTextPool(), '自动（按模型配置页顺序降级）')
+  };
+  console.log('[ai-models] 视觉可选: ' + out.vision.items.map(i => i.label).join(' | '));
+  console.log('[ai-models] 文本可选: ' + out.text.items.map(i => i.label).join(' | '));
+  return out;
+});
+// ---------- 模型配置（独立管理页：所有提供商统一为自定义配置） ----------
+ipcMain.handle('models:list', () => {
+  const a = (clientConfig && clientConfig.aiChat) || {};
+  const list = Array.isArray(a.customProviders) ? a.customProviders : [];
+  return list.map(cp => ({
+    id: cp.id, label: cp.label || cp.id, builtin: false,
+    base: cp.base || '', key: cp.key || '',
+    textModel: cp.textModel || '', visionModel: cp.visionModel || ''
+  }));
+});
+ipcMain.handle('models:save', (e, p) => {
+  if (!p || !p.id) return { ok: false, error: '缺少 Provider ID' };
+  const a = (clientConfig && clientConfig.aiChat) || {};
+  const list = Array.isArray(a.customProviders) ? a.customProviders.slice() : [];
+  const i = list.findIndex(x => x.id === p.id);
+  const item = { id: p.id, label: p.label || p.id, base: String(p.base || ''), key: String(p.key || ''), textModel: String(p.textModel || ''), visionModel: String(p.visionModel || '') };
+  if (i >= 0) list[i] = item; else list.push(item);
+  saveClientConfig({ aiChat: { customProviders: list } });
+  return { ok: true };
+});
+ipcMain.handle('models:delete', (e, id) => {
+  const a = (clientConfig && clientConfig.aiChat) || {};
+  const list = (Array.isArray(a.customProviders) ? a.customProviders : []).filter(x => x.id !== id);
+  saveClientConfig({ aiChat: { customProviders: list } });
+  return { ok: true };
+});
+// 判定某个模型是视觉模型还是文本模型：接口声明优先，模型名兜底（推测，可能不准）
+function classifyModelKind(m) {
+  const inm = Array.isArray(m && m.input_modalities) ? m.input_modalities.map(s => String(s).toLowerCase()) : null;
+  if (inm && inm.length) {
+    if (inm.includes('image') || inm.includes('vision') || inm.includes('video')) return 'vision';
+    return 'text';
+  }
+  // 名字兜底：glm-4.6v-flash / *-vl- / Qwen2.5-VL / *-vision / OCR / omni 等判为视觉
+  const id = String((m && (m.id || m.name || m.model)) || '').toLowerCase();
+  if (/(-v\b|-v-|-vl-|\bvl\b|vision|multimodal|omni|ocr|\d+v\b|[0-9]v[-_]|[0-9]\.?[0-9]?v\b)/i.test(id)) return 'vision';
+  return 'text';
+}
+// 拉取某提供商的可用模型列表，并区分文本/视觉
+ipcMain.handle('models:fetchList', async (e, p) => {
+  const base = String((p && p.base) || '').replace(/\/+$/, '');
+  const key = String((p && p.key) || '');
+  if (!base) return { ok: false, error: '请先填写 API 地址' };
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 20000);
+  try {
+    const r = await fetch(base + '/models', { headers: { Authorization: 'Bearer ' + key }, signal: ac.signal });
+    const txt = await r.text();
+    let j = null; try { j = JSON.parse(txt); } catch (err) {}
+    const arr = Array.isArray(j) ? j : (j && Array.isArray(j.data) ? j.data : null);
+    if (!arr) return { ok: false, error: r.ok ? '返回格式无法识别（不是 {data:[...]}）' : ('HTTP ' + r.status + ' ' + txt.slice(0, 120)) };
+    const text = [], vision = [];
+    for (const m of arr) {
+      const id = m && (m.id || m.name || m.model);
+      if (!id) continue;
+      (classifyModelKind(m) === 'vision' ? vision : text).push(String(id));
+    }
+    return { ok: true, text, vision, total: text.length + vision.length };
+  } catch (err) {
+    return { ok: false, error: String((err && err.message) || err) };
+  } finally { clearTimeout(timer); }
+});
+// 打开配置文件（模型配置页右上角按钮）
+ipcMain.handle('models:openConfig', async () => { try { await shell.openPath(CONFIG_PATH); return { ok: true }; } catch (e) { return { ok: false, error: String((e && e.message) || e) }; } });
 // ---------- 弹幕自动回复（非官方：浏览器自动化抓直播间 DOM） ----------
 let danmakuWin = null;
 let dmTimer = null;

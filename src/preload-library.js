@@ -47,6 +47,11 @@ contextBridge.exposeInMainWorld('api', {
   screenCapture: () => ipcRenderer.invoke('screen:capture'),
   cfgLoad: () => ipcRenderer.invoke('cfg:load'),
   cfgSave: (patch) => ipcRenderer.invoke('cfg:save', patch),
+  modelList: () => ipcRenderer.invoke('models:list'),
+  modelSave: (p) => ipcRenderer.invoke('models:save', p),
+  modelDelete: (id) => ipcRenderer.invoke('models:delete', id),
+  modelFetchList: (p) => ipcRenderer.invoke('models:fetchList', p),
+  openConfigFile: () => ipcRenderer.invoke('models:openConfig'),
   onDanmaku: (cb) => {
     const l = (_e, line) => cb(line);
     ipcRenderer.on('dm:message', l);
