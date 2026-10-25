@@ -45,7 +45,6 @@ contextBridge.exposeInMainWorld('api', {
   },
   chatAI: (cfg) => ipcRenderer.invoke('ai:chat', cfg),
   screenCapture: () => ipcRenderer.invoke('screen:capture'),
-  setAICfg: (cfg) => ipcRenderer.invoke('aiCfg:set', cfg),
   cfgLoad: () => ipcRenderer.invoke('cfg:load'),
   cfgSave: (patch) => ipcRenderer.invoke('cfg:save', patch),
   onDanmaku: (cb) => {

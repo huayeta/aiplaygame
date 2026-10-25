@@ -80,14 +80,6 @@
   </div>
 
   <div class="sec">
-    <div class="t">AI 控制（说一句，AI 自己点）</div>
-    <input class="txt" id="aiCmd" placeholder="例如：一直点棋盘右上角 / 先点左上再点中间">
-    <div class="aiRow"><button class="aiGo" id="aiGo">▶ AI 执行</button><button class="aiStopBtn" id="aiStopCtl">■ 停止</button></div>
-    <label class="check" style="display:block;margin:6px 0;"><input type="checkbox" id="aiVision" checked> 视觉反馈（AI 执行中自动检测画面，卡住/过关会自适应调整）</label>
-    <div class="hint" id="aiNote">使用主窗口「AI读弹幕答疑」的智谱配置，无需重复填 Key</div>
-  </div>
-
-  <div class="sec">
     <div class="t">选项</div>
     <div class="row">
       <span>点击方式</span>
@@ -125,19 +117,6 @@
     $('gameMute').textContent = muted ? '🔊 取消静音（游戏有声）' : '🔇 静音（游戏无声）';
     $('gameMute').classList.toggle('on', muted);
   };
-  $('aiGo').onclick = async () => {
-    const text = $('aiCmd').value.trim();
-    if (!text) { $('aiNote').textContent = '请先输入操作指令，例如：一直点棋盘右上角'; return; }
-    const cfg = await window.panel.getAICfg();
-    if (!cfg || !cfg.key) { $('aiNote').textContent = '请先在主窗口「AI读弹幕答疑」里填写智谱 API Key'; return; }
-    $('aiNote').textContent = 'AI 规划中…（使用智谱配置）';
-    const r = await window.panel.aiPlan({ text, apiKey: cfg.key, baseUrl: cfg.base, model: cfg.model });
-    if (!r || !r.ok) { $('aiNote').textContent = '规划失败：' + (r && r.error || '未知错误'); return; }
-    $('aiNote').textContent = '计划：' + (r.plan.note || '已生成') + '（' + r.plan.points.length + ' 个点，间隔 ' + r.plan.intervalMs + 'ms' + ($('aiVision').checked ? '，视觉反馈已开启' : '') + '）';
-    window.panel.aiStart({ plan: r.plan, text, visionOn: $('aiVision').checked });
-  };
-  $('aiStopCtl').onclick = () => window.panel.aiStop();
-
   $('method').onchange = e => window.panel.setOption({ method: e.target.value });
   $('speed').oninput = e => {
     const v = parseFloat(e.target.value);

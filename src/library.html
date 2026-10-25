@@ -1489,16 +1489,6 @@
   // ---- AI读弹幕答疑 ----
   // 配置统一存到 config/client-config.json（主进程读写），启动加载、变更即保存
   let aiBusy = false;
-  function syncAICfg(){
-    try {
-      window.api.setAICfg({
-        key: document.getElementById('zhipuKey').value.trim(),
-        base: document.getElementById('zhipuBase').value.trim(),
-        model: document.getElementById('zhipuModel').value.trim(),
-        visionModel: document.getElementById('aiVisionModel').value.trim()
-      });
-    } catch (e) {}
-  }
   function saveAICfg(){
     const d = {
       provider: (document.querySelector('input[name="aiProvider"]:checked') || {}).value || 'zhipu',
@@ -1529,7 +1519,6 @@
       aiText: document.getElementById('aiText').checked
     };
     try { window.api.cfgSave({ aiChat: d }); } catch (e) {}
-    syncAICfg();
   }
   // 所有配置控件变更即自动保存到 JSON 文件
   ['dskKey','dskBase','dskModel','zhipuKey','zhipuBase','zhipuModel','siliconKey','siliconBase','siliconModel','sensenovaKey','sensenovaBase','sensenovaModel','qwenKey','baiduAk','baiduSk','aiVisionModel','aiPrompt','aiFilter','aiCool','aiRetry','aiFallOrder'].forEach(id => {
@@ -1832,7 +1821,7 @@
     } catch(e){}
   }
   document.getElementById('aiTest').addEventListener('click', aiPersist);
-  aiLoad().then(() => syncAICfg()); // JSON 配置恢复后同步智谱 Key/Base/Model 给主进程（程序化赋值不触发 input 事件，必须在此补一次）
+  aiLoad(); // JSON 配置恢复
 
   // ---------- 声音克隆（音色库） ----------
   let vcAudioEl = null;

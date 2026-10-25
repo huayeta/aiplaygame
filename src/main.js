@@ -1139,20 +1139,6 @@ ipcMain.handle('game:mute', (e, muted) => {
   return !!gameWin.webContents.isAudioMuted();
 });
 
-// ---------- AI 控制：自然语言 → 点击计划 → 循环执行 ----------
-const aiCtl = { playing: false, abort: false, plan: null };
-// AI 共享配置：主窗口「AI读弹幕答疑」智谱卡片填写的 Key/Base/Model，控制台 AI 控制直接复用
-let aiSharedCfg = { key: '', base: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4.7-flash', visionModel: 'glm-4.6v-flash' };
-ipcMain.handle('aiCfg:set', (e, cfg) => {
-  if (!cfg) return aiSharedCfg;
-  if (typeof cfg.key === 'string') aiSharedCfg.key = cfg.key.trim();
-  if (typeof cfg.base === 'string' && cfg.base.trim()) aiSharedCfg.base = cfg.base.trim();
-  if (typeof cfg.model === 'string' && cfg.model.trim()) aiSharedCfg.model = cfg.model.trim();
-  if (typeof cfg.visionModel === 'string' && cfg.visionModel.trim()) aiSharedCfg.visionModel = cfg.visionModel.trim();
-  return aiSharedCfg;
-});
-ipcMain.handle('aiCfg:get', () => aiSharedCfg);
-
 // ---------- 客户端统一配置文件（config/client-config.json） ----------
 // 所有模块配置集中存到一个 JSON 文件：启动读取、变更即写、任何模块直接查 JSON
 const CONFIG_DIR = path.join(__dirname, '..', 'config');
@@ -1174,13 +1160,6 @@ const DEFAULT_CONFIG = {
   }
 };
 let clientConfig = null;
-function applyAICfgToShared(){
-  const a = (clientConfig && clientConfig.aiChat) || {};
-  aiSharedCfg.key = String(a.zhipuKey || '').trim();
-  aiSharedCfg.base = String(a.zhipuBase || '').trim() || 'https://open.bigmodel.cn/api/paas/v4';
-  aiSharedCfg.model = String(a.zhipuModel || '').trim() || 'glm-4.7-flash';
-  aiSharedCfg.visionModel = String(a.visionModel || '').trim() || 'glm-4.6v-flash';
-}
 function loadClientConfig(){
   try {
     if (fs.existsSync(CONFIG_PATH)) {
@@ -1193,7 +1172,6 @@ function loadClientConfig(){
   } catch (e) {
     clientConfig = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
   }
-  applyAICfgToShared();
   return clientConfig;
 }
 function saveClientConfig(patch){
@@ -1209,152 +1187,11 @@ function saveClientConfig(patch){
     fs.mkdirSync(CONFIG_DIR, { recursive: true });
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(clientConfig, null, 2), 'utf8');
   } catch (e) {}
-  applyAICfgToShared();
   return clientConfig;
 }
 loadClientConfig(); // 客户端启动即加载
 ipcMain.handle('cfg:load', () => loadClientConfig());
 ipcMain.handle('cfg:save', (e, patch) => saveClientConfig(patch));
-// 从 LLM 回复中提取 JSON（容忍 ```json 包裹与前后多余文字）
-function extractJson(s) {
-  if (!s) return null;
-  const m = String(s).match(/\{[\s\S]*\}/);
-  if (!m) return null;
-  try { return JSON.parse(m[0]); } catch (e) {
-    try { return JSON.parse(String(s).replace(/```json|```/gi, '').trim()); } catch (e2) { return null; }
-  }
-}
-// 调智谱 GLM 生成点击计划 JSON
-ipcMain.handle('aiCtl:plan', async (e, cfg) => {
-  const apiKey = String(cfg && cfg.apiKey || '').trim() || aiSharedCfg.key; // 未传 Key 时复用主窗口智谱配置
-  const text = String(cfg && cfg.text || '').trim();
-  const model = String(cfg && cfg.model || '').trim() || aiSharedCfg.model;
-  const baseUrl = String(cfg && cfg.baseUrl || '').trim() || aiSharedCfg.base;
-  if (!apiKey) return { ok: false, error: '请先在主窗口「AI读弹幕答疑」里填写智谱 API Key' };
-  if (!text) return { ok: false, error: '指令为空' };
-  const sys = '你是H5小游戏自动点击规划器。游戏窗口尺寸 ' + GAME_W + 'x' + GAME_H + '（相对坐标，左上角为0,0）。根据用户指令只输出一个JSON对象：{"points":[{"x":0~' + GAME_W + '的整数,"y":0~' + GAME_H + '的整数,"times":整数点几次}],"intervalMs":点击间隔毫秒(800~1500),"durationSec":0或秒数(0=一直点直到停止),"checkAfter":每次点击多少轮后检测一次画面(0=不需要检测画面,10~20常用),"note":"一句话说明在做什么"}。多目标点就放多个points。checkAfter按需判断：指令要求观察画面/过关/自适应时设10~20，纯固定点击(如一直点某处)设0。禁止输出JSON以外的任何文字。';
-  try {
-    const r = await fetch(baseUrl.replace(/\/+$/, '') + '/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
-      body: JSON.stringify({
-        model,
-        messages: [ { role: 'system', content: sys }, { role: 'user', content: text } ],
-        max_tokens: 400, temperature: 0.3,
-        thinking: { type: 'disabled' }
-      })
-    });
-    const j = await r.json().catch(() => null);
-    if (!r.ok) return { ok: false, error: (j && j.error && j.error.message) || ('HTTP ' + r.status) };
-    const content = (j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || '';
-    const plan = extractJson(content);
-    if (!plan || !Array.isArray(plan.points) || !plan.points.length) return { ok: false, error: 'AI 未生成有效点击计划' };
-    plan.points = plan.points.map(p => ({ x: Math.max(0, Math.min(GAME_W, Math.round(Number(p.x) || 0))), y: Math.max(0, Math.min(GAME_H, Math.round(Number(p.y) || 0))), times: Math.max(1, Math.round(Number(p.times) || 1)) }));
-    plan.intervalMs = Math.max(200, Math.round(Number(plan.intervalMs) || 1000));
-    plan.durationSec = Math.max(0, Number(plan.durationSec) || 0);
-    plan.checkAfter = Math.max(0, Math.min(100, Math.round(Number(plan.checkAfter) || 0))); // 0=不检测，>0=每N轮点击检测一次
-    plan.note = String(plan.note || '');
-    return { ok: true, plan };
-  } catch (err) { return { ok: false, error: String((err && err.message) || err) }; }
-});
-// 视觉检查：截当前游戏画面给 GLM 视觉模型，返回下一步决策（失败自动重试最多3次）
-async function aiVisionCheck(plan, userText) {
-  const MAX_RETRY = 3, RETRY_DELAY = 2000;
-  let last = null;
-  for (let i = 1; i <= MAX_RETRY; i++) {
-    last = await aiVisionCheckOnce(plan, userText);
-    if (last.ok || last.fatal) return last; // 成功或不可重试（窗口没了）直接返回
-    if (i < MAX_RETRY) { setStatus('视觉检查失败（' + last.error + '），重试中 ' + i + '/' + MAX_RETRY + '…'); await sleep(RETRY_DELAY); }
-  }
-  last.error = (last.error || '未知错误') + '（已重试 ' + MAX_RETRY + ' 次仍失败）';
-  return last;
-}
-async function aiVisionCheckOnce(plan, userText) {
-  try {
-    if (!gameWin || gameWin.isDestroyed()) return { ok: false, fatal: true, error: '游戏窗口不存在' };
-    const img = await gameWin.webContents.capturePage();
-    const b64 = img.toJPEG(70).toString('base64'); // JPEG 压缩，减小请求体积
-    const sys = '你是H5小游戏视觉操作员。画面是游戏窗口（相对坐标 ' + GAME_W + 'x' + GAME_H + '，左上角为0,0）。玩家的目标指令：' + (userText || '') + '。当前点击计划：' + JSON.stringify({ points: plan.points, intervalMs: plan.intervalMs }) + '。看画面判断下一步，只输出一个JSON：{"act":"continue|adjust|stop|wait","points":[{"x":0~' + GAME_W + ',"y":0~' + GAME_H + ',"times":n}],"intervalMs":800~1500,"note":"你看到的画面状态一句话"}。continue=画面正常按原计划继续；adjust=画面变化，按新的points点；stop=已通关/失败/画面结束；wait=画面正在变化先等待。act为continue或wait时points可为空。禁止输出JSON以外的任何文字。';
-    const r = await fetch(aiSharedCfg.base.replace(/\/+$/, '') + '/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + aiSharedCfg.key },
-      body: JSON.stringify({
-        model: aiSharedCfg.visionModel || 'glm-4.6v-flash',
-        messages: [
-          { role: 'system', content: sys },
-          { role: 'user', content: [ { type: 'text', text: '请判断当前游戏画面状态并给出下一步' }, { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + b64 } } ] }
-        ],
-        max_tokens: 400, temperature: 0.3,
-        thinking: { type: 'disabled' }
-      })
-    });
-    const j = await r.json().catch(() => null);
-    if (!r.ok) return { ok: false, error: (j && j.error && j.error.message) || ('HTTP ' + r.status) };
-    const content = (j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || '';
-    const d = extractJson(content);
-    if (!d || !d.act) return { ok: false, error: '视觉模型未返回有效决策' };
-    const res = { ok: true, act: d.act, note: String(d.note || ''), intervalMs: Math.max(200, Math.round(Number(d.intervalMs) || 1000)) };
-    if (Array.isArray(d.points) && d.points.length) {
-      res.points = d.points.map(p => ({ x: Math.max(0, Math.min(GAME_W, Math.round(Number(p.x) || 0))), y: Math.max(0, Math.min(GAME_H, Math.round(Number(p.y) || 0))), times: Math.max(1, Math.round(Number(p.times) || 1)) }));
-    }
-    return res;
-  } catch (err) { return { ok: false, error: String((err && err.message) || err) }; }
-}
-// 按计划循环点击（视觉反馈：按 AI 规划出的 checkAfter 节奏检测画面，0=不检测，3秒内不重复）
-async function aiRunLoop(plan, userText, visionOn) {
-  const cur = { points: plan.points.slice(), intervalMs: plan.intervalMs, note: plan.note, checkAfter: plan.checkAfter || 0 };
-  const maxMs = plan.durationSec > 0 ? plan.durationSec * 1000 : Infinity;
-  const t0 = Date.now();
-  let pi = 0;
-  let clickSinceVision = 0; // 距上次视觉检查的点击轮数
-  let lastVision = 0;       // 上次视觉检查时间戳
-  if (gameWin && !gameWin.isDestroyed()) gameWin.focus();
-  while (aiCtl.playing && !aiCtl.abort) {
-    const now = Date.now();
-    // 按 AI 规划节奏检测：达到 checkAfter 轮 且 距上次≥3秒（节流防 API 轰炸）
-    const dueByClicks = cur.checkAfter > 0 && clickSinceVision >= cur.checkAfter;
-    const throttled = lastVision > 0 && (now - lastVision < 3000);
-    if (visionOn && aiSharedCfg.key && dueByClicks && !throttled) {
-      lastVision = now;
-      clickSinceVision = 0;
-      const v = await aiVisionCheck(cur, userText);
-      if (v) {
-        if (v.ok && v.act === 'stop') { setStatus('AI 看到：' + (v.note || '画面结束') + ' → 停止'); aiCtl.playing = false; break; }
-        else if (v.ok && v.act === 'adjust' && v.points && v.points.length) { cur.points = v.points; cur.intervalMs = v.intervalMs; if (v.note) setStatus('AI 看到：' + v.note + ' → 调整点击位置'); }
-        else if (v.ok && v.act === 'continue') { if (v.note) setStatus('AI 看到：' + v.note + ' → 继续'); }
-        else if (v.ok && v.act === 'wait') { await sleep(v.intervalMs || 1500); lastVision = 0; continue; } // 画面在动，等待后重新检查，本轮不点击
-        else if (!v.ok) setStatus('视觉检查失败（' + v.error + '），按原计划继续'); // 视觉 API 异常 → 降级盲点，不中断
-      }
-    }
-    const p = cur.points[pi % cur.points.length];
-    for (let k = 0; k < p.times; k++) {
-      if (aiCtl.abort) break;
-      await doTap(p.x, p.y);
-      await sleep(cur.intervalMs);
-    }
-    pi++;
-    clickSinceVision++; // 完成一轮点击后计数
-    if (Date.now() - t0 > maxMs) break;
-  }
-  aiCtl.playing = false;
-  setStatus(aiCtl.abort ? 'AI 控制已停止' : 'AI 控制结束：' + (cur.note || plan.note));
-}
-ipcMain.on('aiCtl:start', (e, data) => {
-  const plan = data && data.plan;
-  if (aiCtl.playing) { setStatus('AI 控制已在运行，先停止再换指令'); return; }
-  if (!plan || !Array.isArray(plan.points) || !plan.points.length) { setStatus('无效点击计划'); return; }
-  aiCtl.plan = plan;
-  aiCtl.userText = String(data.text || '');
-  aiCtl.visionOn = !!data.visionOn;
-  aiCtl.playing = true;
-  aiCtl.abort = false;
-  const vDesc = aiCtl.visionOn ? (plan.checkAfter > 0 ? '（视觉反馈：每' + plan.checkAfter + '次点击检测画面）' : '（视觉反馈开启，按 AI 计划检测）') : '';
-  setStatus('AI 控制开始' + vDesc + '：' + plan.note);
-  aiRunLoop(plan, aiCtl.userText, aiCtl.visionOn);
-});
-ipcMain.on('aiCtl:stop', () => { if (aiCtl.playing) { aiCtl.abort = true; setStatus('正在停止 AI 控制…'); } });
-ipcMain.handle('aiCtl:state', () => ({ playing: aiCtl.playing, note: (aiCtl.plan && aiCtl.plan.note) || '' }));
-
 ipcMain.on('game:pointer', (e, p) => {
   if (auto.recording && auto.script) {
     const now = Date.now();
