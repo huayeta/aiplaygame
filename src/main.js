@@ -1150,7 +1150,7 @@ const DEFAULT_CONFIG = {
     dskKey: '', dskBase: 'https://api.deepseek.com', dskModel: 'deepseek-v4-flash',
     zhipuKey: '', zhipuBase: 'https://open.bigmodel.cn/api/paas/v4', zhipuModel: 'glm-4.7-flash',
     siliconKey: '', siliconBase: '', siliconModel: '',
-    sensenovaKey: '', sensenovaBase: 'https://token.sensenova.cn/v1', sensenovaModel: 'sensenova-6.7-flash-lite',
+    sensenovaKey: '', sensenovaBase: 'https://token.sensenova.cn/v1', sensenovaModel: 'sensenova-6.7-flash-lite', sensenovaVisionModel: '',
     qwenKey: '', qwenModel: 'qwen3-tts-flash',
     baiduAk: '', baiduSk: '',
     visionModel: 'glm-4.6v-flash',
@@ -1234,6 +1234,156 @@ ipcMain.on('tpl:capture', async () => {
   fs.writeFileSync(file, img.toPNG());
   setStatus('已截图模板：' + path.basename(file));
 });
+
+// ---------- AI 智能决策：逐步截图 → 视觉模型决策 → 执行（智谱主 / 商汤降级 + 重试） ----------
+// 与脚本回放（自动玩）互不影响：独立 playing 状态、独立启停；复用 doTap 的 0~1 相对坐标换算
+const aiAgent = { playing: false, abort: false, note: '' };
+// 从模型回复提取 JSON（容忍 ```json 包裹与前后多余文字）
+function extractJson(s) {
+  if (!s) return null;
+  const m = String(s).match(/\{[\s\S]*\}/);
+  if (!m) return null;
+  try { return JSON.parse(m[0]); } catch (e) {
+    try { return JSON.parse(String(s).replace(/```json|```/gi, '').trim()); } catch (e2) { return null; }
+  }
+}
+// 单次视觉对话（OpenAI 兼容），返回 {ok,text,error}
+async function aiChatOnce(conf, imgB64, system, history, hintText) {
+  try {
+    const url = conf.base.replace(/\/+$/, '') + '/chat/completions';
+    const body = {
+      model: conf.model,
+      messages: [
+        { role: 'system', content: system },
+        ...(history || []),
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: hintText || '请看当前游戏画面，输出下一步动作 JSON' },
+            { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + imgB64 } }
+          ]
+        }
+      ],
+      max_tokens: 600, temperature: 0.3
+    };
+    if (/^glm/i.test(conf.model)) body.thinking = { type: 'disabled' }; // 智谱混合思考模型关闭思考，content 直接给正式回答
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + conf.key },
+      body: JSON.stringify(body)
+    });
+    const j = await r.json().catch(() => null);
+    if (!r.ok) return { ok: false, error: (j && j.error && j.error.message) || ('HTTP ' + r.status) };
+    const msg = (j && j.choices && j.choices[0] && j.choices[0].message) || {};
+    let text = msg.content;
+    if (text == null || text === '') text = msg.reasoning_content;
+    if (Array.isArray(text)) text = text.map(p => (p && (p.text || p.content)) || '').join('');
+    text = String(text || '').trim();
+    if (!text) return { ok: false, error: '模型返回空内容' };
+    return { ok: true, text };
+  } catch (err) { return { ok: false, error: String((err && err.message) || err) }; }
+}
+// 模型池逐级降级：智谱(主)视觉模型列表 → 商汤(降级)视觉模型列表；每个模型重试 N 次，失败自动切换下一个
+// 配置支持逗号分隔（如 visionModel: "glm-4.6v-flash, glm-4.5v"），按书写顺序逐个尝试
+function modelList(v) { return String(v || '').split(/[,，]/).map(s => s.trim()).filter(Boolean); }
+async function aiVisionAsk(imgB64, system, history, hintText) {
+  const a = (clientConfig && clientConfig.aiChat) || {};
+  const retry = Math.max(1, Math.min(5, Number(a.aiRetry) || 3));
+  const gap = 2000;
+  const pool = [];
+  if (String(a.zhipuKey || '').trim()) {
+    const models = modelList(a.visionModel).length ? modelList(a.visionModel) : ['glm-4.6v-flash'];
+    for (const m of models) pool.push({ key: String(a.zhipuKey).trim(), base: String(a.zhipuBase || 'https://open.bigmodel.cn/api/paas/v4').trim(), model: m, tag: '智谱' });
+  }
+  if (String(a.sensenovaKey || '').trim()) {
+    const models = modelList(a.sensenovaVisionModel).length ? modelList(a.sensenovaVisionModel) : modelList(a.sensenovaModel);
+    const ms = models.length ? models : ['sensenova-6.8-flash-lite'];
+    for (const m of ms) pool.push({ key: String(a.sensenovaKey).trim(), base: String(a.sensenovaBase || 'https://token.sensenova.cn/v1').trim(), model: m, tag: '商汤' });
+  }
+  if (!pool.length) return { ok: false, error: '未配置视觉模型 Key（需智谱或商汤任一）' };
+  let lastErr = '未知错误';
+  for (let pi = 0; pi < pool.length; pi++) {
+    const item = pool[pi];
+    for (let i = 1; i <= retry; i++) {
+      const r = await aiChatOnce({ key: item.key, base: item.base, model: item.model }, imgB64, system, history, hintText);
+      if (r.ok) return Object.assign(r, { used: item.tag + ' ' + item.model });
+      lastErr = r.error;
+      if (i < retry) { setStatus(item.tag + '「' + item.model + '」繁忙（' + r.error + '），重试 ' + i + '/' + retry + '…', { aiPlaying: true }); await sleep(gap); }
+    }
+    if (pi < pool.length - 1) setStatus(item.tag + '「' + item.model + '」失败，切换下一个模型…', { aiPlaying: true });
+  }
+  return { ok: false, error: '全部视觉模型调用失败：' + lastErr };
+}
+// AI 决策循环：每轮截图→模型出动作→执行→再截图
+async function aiAgentLoop(cfg) {
+  const game = readGames().find(g => g.id === auto.gameId);
+  const rules = String((game && game.rules) || '').trim();
+  const goal = String((cfg && cfg.text) || '').trim();
+  const system =
+    '你是H5小游戏自动操作员。游戏窗口尺寸 414x736，坐标用 0~1 相对比例（左上角为0,0）。' +
+    (rules ? '\n[游戏规则]\n' + rules : '') +
+    '\n[当前任务]\n' + (goal || '自动游玩并尽量通关') +
+    '\n每轮我会发一张当前游戏截图。你看画面判断并输出下一步，只输出一个JSON：' +
+    '{"reasoning":"你看到的画面一句话","actions":[{"type":"tap","x":0~1,"y":0~1}|{"type":"wait","ms":500}|{"type":"restart"}],"done":false}。' +
+    '约束：一次最多3个动作；tap坐标必须在0~1；wait用于等待动画/加载/画面变化；restart表示重新开始本局；done=true表示已通关或无法继续（会自动停止）。禁止输出JSON以外的任何文字。';
+  let history = [];
+  let stuck = 0;      // 画面连续无变化轮数
+  let lastSig = null;
+  aiAgent.playing = true;
+  aiAgent.abort = false;
+  aiAgent.note = '';
+  setStatus('AI 智能决策开始' + (rules ? '（已加载游戏规则）' : '（未填游戏规则，建议在游戏库编辑里填写）') + '：' + (goal || '自动游玩'), { aiPlaying: true });
+  try {
+    while (aiAgent.playing && !aiAgent.abort) {
+      if (!gameWin || gameWin.isDestroyed()) { setStatus('游戏窗口已关闭，AI 停止', { aiPlaying: false }); aiAgent.playing = false; break; }
+      const page = await gameWin.webContents.capturePage();
+      const small = page.resize({ width: 414, height: 736 }); // 压小省 token/延迟
+      const b64 = small.toJPEG(70).toString('base64');
+      // 卡住提示：连续多轮画面几乎没变 → 告诉模型换策略
+      let hint = '';
+      const sig = await signature();
+      if (lastSig && sig) {
+        const sim = similarity(lastSig, sig);
+        if (sim > 0.985) { stuck++; if (stuck >= 3) hint = '（提示：画面已连续' + stuck + '轮无明显变化，可能卡住了，请换策略、等待或 restart）'; }
+        else stuck = 0;
+      }
+      lastSig = sig;
+      const res = await aiVisionAsk(b64, system, history, hint ? '请看当前游戏画面' + hint : undefined);
+      if (!res.ok) {
+        setStatus('视觉决策失败：' + res.error + '（本轮等待后重试）', { aiPlaying: true });
+        await sleep(3000);
+        continue;
+      }
+      const act = extractJson(res.text);
+      if (!act || !Array.isArray(act.actions) || !act.actions.length) {
+        setStatus('模型未返回有效动作（' + (res.fallback ? '商汤' : '智谱') + '），等待后重试', { aiPlaying: true });
+        await sleep(2500);
+        continue;
+      }
+      const who = res.used || '视觉模型';
+      setStatus('AI 看到：' + String(act.reasoning || act.note || '') + '（' + who + '）', { aiPlaying: true });
+      for (const ac of act.actions.slice(0, 3)) {
+        if (aiAgent.abort) break;
+        if (ac.type === 'tap') { await doTap(Number(ac.x), Number(ac.y)); await sleep(600); }
+        else if (ac.type === 'wait') { await sleep(Math.max(200, Number(ac.ms) || 500)); }
+        else if (ac.type === 'restart') { if (gameWin && !gameWin.isDestroyed()) gameWin.webContents.reload(); await sleep(1200); }
+      }
+      history = [{ role: 'assistant', content: res.text }]; // 轻量上下文：让模型记得自己上一步说了什么
+      if (act.done) { setStatus('AI 判定结束：' + String(act.reasoning || '完成') + '（停止）', { aiPlaying: false }); aiAgent.playing = false; break; }
+    }
+  } catch (err) {
+    setStatus('AI 智能决策异常：' + String((err && err.message) || err), { aiPlaying: false });
+  }
+  aiAgent.playing = false;
+  setStatus(aiAgent.abort ? 'AI 智能决策已停止' : 'AI 智能决策结束', { aiPlaying: false });
+}
+ipcMain.on('aiAgent:start', (e, cfg) => {
+  if (aiAgent.playing) { setStatus('AI 智能决策已在运行，先停止再开始', { aiPlaying: true }); return; }
+  if (auto.playing) { setStatus('脚本自动玩正在运行，请先停止', { aiPlaying: true }); return; }
+  aiAgentLoop(cfg || {});
+});
+ipcMain.on('aiAgent:stop', () => { if (aiAgent.playing) { aiAgent.abort = true; setStatus('正在停止 AI 智能决策…', { aiPlaying: true }); } });
+ipcMain.handle('aiAgent:state', () => ({ playing: aiAgent.playing, note: aiAgent.note }));
 
 // ---------- 弹幕自动回复（非官方：浏览器自动化抓直播间 DOM） ----------
 let danmakuWin = null;

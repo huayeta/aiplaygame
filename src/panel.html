@@ -30,7 +30,12 @@
   select, input[type=range] { width: 130px; }
   select { padding: 6px; border-radius: 8px; background: #0f1020; color: #e8e9f5; border: 1px solid #2a2d52; }
   .check { display: flex; align-items: center; gap: 8px; font-size: 13px; margin-bottom: 8px; }
-  .status { background: #0f1020; border-radius: 10px; padding: 12px; font-size: 13px; min-height: 46px; line-height: 1.5; }
+  .status { background: #0f1020; border-radius: 10px; padding: 10px 12px; font-size: 12px; line-height: 1.6; min-height: 46px; max-height: 220px; overflow-y: auto; }
+  .status-item { display: block; word-break: break-all; }
+  .status-item .st-time { color: #6b7280; margin-right: 6px; font-size: 11px; }
+  .status-empty { color: #6b7280; }
+  .clearSt { float: right; margin: 0; padding: 3px 10px; font-size: 11px; border-radius: 6px; border: 1px solid #2a2d52; background: #15172b; color: #9aa0c3; cursor: pointer; }
+  .clearSt:hover { background: #1d2040; color: #e8e9f5; }
   .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #555; margin-right: 6px; }
   .dot.on { background: #22d3ee; }
   .dot.rec { background: #ff4d6d; }
@@ -74,6 +79,13 @@
   </div>
 
   <div class="sec">
+    <div class="t">AI 智能决策（说一句，AI 看画面自己玩）</div>
+    <input class="txt" id="aiCmd" placeholder="例如：帮我一直点开始按钮 / 自动过关">
+    <div class="aiRow"><button class="aiGo" id="aiGo">▶ AI 开始</button><button class="aiStopBtn" id="aiStopCtl">■ 停止</button></div>
+    <div class="hint" id="aiNote">AI 每步截取游戏画面，让视觉模型决策（智谱 glm-4.6v-flash 主，失败自动重试并降级商汤）。游戏规则在「游戏库 → 编辑游戏 → 游戏规则」里填写，填了 AI 更懂怎么玩。</div>
+  </div>
+
+  <div class="sec">
     <div class="t">声音控制</div>
     <button class="mute" id="gameMute">🔇 静音（游戏无声）</button>
     <div class="hint">一键静音游戏窗口声音，观众只听到 AI 语音和背景音乐</div>
@@ -99,8 +111,8 @@
   </div>
 
   <div class="sec">
-    <div class="t">状态</div>
-    <div class="status" id="status">等待操作…</div>
+    <div class="t">状态（记录变化过程，最新在最上）<button class="clearSt" id="clearStatus">清空</button></div>
+    <div class="status" id="statusList"><span class="status-item status-empty">等待操作…</span></div>
   </div>
 
 <script>
@@ -117,6 +129,12 @@
     $('gameMute').textContent = muted ? '🔊 取消静音（游戏有声）' : '🔇 静音（游戏无声）';
     $('gameMute').classList.toggle('on', muted);
   };
+  $('aiGo').onclick = () => {
+    const text = $('aiCmd').value.trim();
+    if (!text) { $('aiNote').textContent = '请先输入指令，例如：帮我一直点开始按钮'; return; }
+    window.panel.aiStart({ text });
+  };
+  $('aiStopCtl').onclick = () => window.panel.aiStop();
   $('method').onchange = e => window.panel.setOption({ method: e.target.value });
   $('speed').oninput = e => {
     const v = parseFloat(e.target.value);
@@ -168,11 +186,26 @@
   window.panel.onLevels(renderLevels);
   window.panel.scriptInfo().then(renderLevels); // 首次加载（之后靠实时推送）
 
+  $('clearStatus').onclick = () => {
+    const box = $('statusList');
+    box.innerHTML = '<span class="status-item status-empty">等待操作…</span>';
+  };
   window.panel.onStatus(d => {
-    $('status').textContent = d.text || '';
+    // 状态累积列表：带时间戳、最新在最上，保留最近 60 条
+    if (d.text) {
+      const box = $('statusList');
+      if (box.firstChild && box.firstChild.classList && box.firstChild.classList.contains('status-empty')) box.innerHTML = '';
+      const now = new Date();
+      const ts = ('0' + now.getHours()).slice(-2) + ':' + ('0' + now.getMinutes()).slice(-2) + ':' + ('0' + now.getSeconds()).slice(-2);
+      const item = document.createElement('span');
+      item.className = 'status-item';
+      item.innerHTML = '<span class="st-time">' + ts + '</span>' + d.text.replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+      box.prepend(item);
+      while (box.children.length > 60) box.removeChild(box.lastChild);
+    }
     const dot = $('dot');
-    dot.className = 'dot' + (d.recording ? ' rec' : d.playing ? ' on' : '');
-    $('state').textContent = d.recording ? '录制中' : (d.phase === 'test' ? '测试中' : d.phase === 'prep' ? '推进中' : d.playing ? '自动玩中' : '就绪');
+    dot.className = 'dot' + (d.recording ? ' rec' : (d.aiPlaying || d.playing) ? ' on' : '');
+    $('state').textContent = d.recording ? '录制中' : (d.phase === 'test' ? '测试中' : d.phase === 'prep' ? '推进中' : d.aiPlaying ? 'AI 决策中' : d.playing ? '自动玩中' : '就绪');
   });
 </script>
 </body>
