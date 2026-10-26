@@ -183,7 +183,10 @@
   #viewModel .md-pick .mk { font-size:10px; padding:1px 5px; border-radius:4px; flex:none; font-weight:600; }
   #viewModel .md-pick .mk.v { color:#22d39a; background:rgba(34,211,154,.12); }
   #viewModel .md-pick .mk.t { color:#7c5cff; background:rgba(124,92,255,.14); }
+  #viewModel .md-pick .mk.b { color:#38bdf8; background:rgba(56,189,248,.14); }
   #viewModel .md-pick .mk.s { color:#fbbf24; background:rgba(251,191,36,.14); }
+  #viewModel .md-pick .pf { font-size:10px; padding:1px 5px; border-radius:4px; flex:none; font-weight:700; color:#0f1020; background:#22d39a; }
+  #viewModel .md-pick .pp { font-size:10px; padding:1px 5px; border-radius:4px; flex:none; font-weight:600; color:#f87171; background:rgba(248,113,113,.14); }
   #viewModel .md-pick .mn { flex:1 1 0; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   #viewModel .md-tip { font-size:11px; color:#6b7a99; display:block; margin-top:4px; }
   #viewModel .md-newbox { background:#15162a; border:1px solid #2a2d52; border-radius:16px; padding:20px 22px; margin-top:18px; }
@@ -1952,38 +1955,52 @@
           if (!r.total) { msgEl.style.color = '#f87171'; msgEl.textContent = '该接口没有返回任何模型'; return; }
           const saved = new Set(String(p.textModel || '').split(/[,，]/).map(s => s.trim()).filter(Boolean)
             .concat(String(p.visionModel || '').split(/[,，]/).map(s => s.trim()).filter(Boolean)));
-          const rows = [];
-          (r.vision || []).forEach(m => rows.push(['vision', m]));
-          (r.text || []).forEach(m => rows.push(['text', m]));
+          // 排序：免费优先 → 通用 → 视觉 → 文本，方便一眼看到能白嫖的模型
+          const KIND_ORDER = { both: 0, vision: 1, text: 2 };
+          const rows = (r.items || []).slice().sort((a, b) => {
+            const fa = a.price === 'free' ? 0 : (a.price === 'paid' ? 2 : 1);
+            const fb = b.price === 'free' ? 0 : (b.price === 'paid' ? 2 : 1);
+            if (fa !== fb) return fa - fb;
+            return KIND_ORDER[a.kind] - KIND_ORDER[b.kind];
+          });
           // 接口返回的模型里没出现、但原先已配置的：合并进列表并标为「已存」，避免被清空
-          const listed = new Set(rows.map(x => x[1]));
+          const listed = new Set(rows.map(x => x.id));
           const missing = Array.from(saved).filter(m => !listed.has(m));
-          missing.forEach(m => rows.push(['text', m]));
-          pick.innerHTML = rows.map(([kind, m]) => {
+          missing.forEach(m => rows.push({ id: m, kind: 'text', price: '' }));
+          const KIND_LABEL = { both: '通用', vision: '视觉', text: '文本' };
+          const KIND_CLASS = { both: 'b', vision: 'v', text: 't' };
+          pick.innerHTML = rows.map(({ id: m, kind, price }) => {
             const isSaved = saved.has(m), isMissing = missing.indexOf(m) >= 0;
+            const priceTag = price === 'free' ? '<span class="pf">免费</span>'
+              : (price === 'paid' ? '<span class="pp">收费</span>' : '');
             return '<label title="' + mdEsc(m) + '"><input type="checkbox" data-kind="' + kind + '" value="' + mdEsc(m) + '"' + (isSaved || isMissing ? ' checked' : '') + '>' +
-            '<span class="mk ' + (isMissing ? 's' : (kind === 'vision' ? 'v' : 't')) + '">' + (isMissing ? '已存' : (kind === 'vision' ? '视觉' : '文本')) + '</span>' +
+            '<span class="mk ' + (isMissing ? 's' : KIND_CLASS[kind]) + '">' + (isMissing ? '已存' : KIND_LABEL[kind]) + '</span>' +
+            priceTag +
             '<span class="mn">' + mdEsc(m) + '</span></label>';
           }).join('');
           const sync = () => {
             const sel = k => Array.from(pick.querySelectorAll('input[data-kind="' + k + '"]:checked')).map(i => i.value);
-            // 原「已存」的文本模型不在列表项里时也要保留
-            const keptText = Array.from(pick.querySelectorAll('input[data-kind="text"]:checked')).map(i => i.value);
-            ed.querySelector('[data-k="textModel"]').value = keptText.join(', ');
-            ed.querySelector('[data-k="visionModel"]').value = sel('vision').join(', ');
+            const boths = sel('both');
+            // 「通用」模型：文本与视觉两个输入框都写入
+            ed.querySelector('[data-k="textModel"]').value = sel('text').concat(boths).join(', ');
+            ed.querySelector('[data-k="visionModel"]').value = sel('vision').concat(boths).join(', ');
           };
           pick.querySelectorAll('input[type=checkbox]').forEach(cb => cb.onchange = sync);
           if (!saved.size) {
             pick.querySelectorAll('input[data-kind="vision"]').forEach(cb => cb.checked = true);
+            pick.querySelectorAll('input[data-kind="both"]').forEach(cb => cb.checked = true);
             let n = 0;
             pick.querySelectorAll('input[data-kind="text"]').forEach(cb => { if (n < 5) { cb.checked = true; n++; } });
           }
           sync();
-          const vn2 = (r.vision || []).length;
+          const cnt = k => rows.filter(x => x.kind === k).length;
+          const freeN = rows.filter(x => x.price === 'free').length;
           msgEl.style.color = '#22d39a';
-          msgEl.textContent = '共 ' + r.total + ' 个（视觉 ' + vn2 + ' / 文本 ' + (r.text || []).length + '）'
-            + (saved.size ? '，已保留你原先已配置的' : '，已默认勾选视觉全部 + 文本前 5 个') + '，可自行调整'
-            + (vn2 ? '' : '。⚠️ 该接口没返回视觉模型，视觉模型请在下方手动填写');
+          msgEl.textContent = '共 ' + r.total + ' 个（通用 ' + cnt('both') + ' / 视觉 ' + cnt('vision') + ' / 文本 ' + cnt('text') + '）'
+            + (freeN ? '，其中 ' + freeN + ' 个免费' : '')
+            + (r.priceFrom === 'api' ? '' : (r.priceFrom === 'name' ? '（价格按模型名推测）' : '（该平台未提供价格信息）'))
+            + (saved.size ? '，已保留你原先已配置的' : '，已默认勾选通用+视觉全部 + 文本前 5 个') + '，可自行调整'
+            + (cnt('vision') + cnt('both') ? '' : '。⚠️ 该接口没返回视觉模型，视觉模型请在下方手动填写');
         };
         ed.querySelector('[data-act=save]').onclick = async () => {
           const val = k => { const el = ed.querySelector('[data-k="' + k + '"]'); return el ? el.value : ''; };
@@ -2019,29 +2036,45 @@
       return;
     }
     if (!r.total) { msg.style.color = '#f87171'; msg.textContent = '该接口没有返回任何模型'; return; }
-    const rows = [];
-    (r.vision || []).forEach(m => rows.push(['vision', m]));
-    (r.text || []).forEach(m => rows.push(['text', m]));
-    pick.innerHTML = rows.map(([kind, m]) =>
-      '<label title="' + mdEsc(m) + '"><input type="checkbox" data-kind="' + kind + '" value="' + mdEsc(m) + '">' +
-      '<span class="mk ' + (kind === 'vision' ? 'v' : 't') + '">' + (kind === 'vision' ? '视觉' : '文本') + '</span>' +
-      '<span class="mn">' + mdEsc(m) + '</span></label>'
-    ).join('');
+    // 排序：免费优先 → 通用 → 视觉 → 文本
+    const KIND_ORDER = { both: 0, vision: 1, text: 2 };
+    const rows = (r.items || []).slice().sort((a, b) => {
+      const fa = a.price === 'free' ? 0 : (a.price === 'paid' ? 2 : 1);
+      const fb = b.price === 'free' ? 0 : (b.price === 'paid' ? 2 : 1);
+      if (fa !== fb) return fa - fb;
+      return KIND_ORDER[a.kind] - KIND_ORDER[b.kind];
+    });
+    const KIND_LABEL = { both: '通用', vision: '视觉', text: '文本' };
+    const KIND_CLASS = { both: 'b', vision: 'v', text: 't' };
+    pick.innerHTML = rows.map(({ id: m, kind, price }) => {
+      const priceTag = price === 'free' ? '<span class="pf">免费</span>'
+        : (price === 'paid' ? '<span class="pp">收费</span>' : '');
+      return '<label title="' + mdEsc(m) + '"><input type="checkbox" data-kind="' + kind + '" value="' + mdEsc(m) + '">' +
+        '<span class="mk ' + KIND_CLASS[kind] + '">' + KIND_LABEL[kind] + '</span>' + priceTag +
+        '<span class="mn">' + mdEsc(m) + '</span></label>';
+    }).join('');
     const sync = () => {
       const sel = k => Array.from(pick.querySelectorAll('input[data-kind="' + k + '"]:checked')).map(i => i.value);
-      document.getElementById('mdNewText').value = sel('text').join(', ');
-      document.getElementById('mdNewVision').value = sel('vision').join(', ');
+      const boths = sel('both');
+      // 「通用」模型：两个输入框都写入
+      document.getElementById('mdNewText').value = sel('text').concat(boths).join(', ');
+      document.getElementById('mdNewVision').value = sel('vision').concat(boths).join(', ');
     };
     pick.querySelectorAll('input[type=checkbox]').forEach(cb => cb.onchange = sync);
-    // 默认帮用户勾上：视觉模型全选，文本模型最多 5 个，避免一次填太多
+    // 默认帮用户勾上：通用+视觉全部，文本最多 5 个，避免一次填太多
     pick.querySelectorAll('input[data-kind="vision"]').forEach(cb => cb.checked = true);
+    pick.querySelectorAll('input[data-kind="both"]').forEach(cb => cb.checked = true);
     let n = 0;
     pick.querySelectorAll('input[data-kind="text"]').forEach(cb => { if (n < 5) { cb.checked = true; n++; } });
     sync();
-    const vn = (r.vision || []).length;
+    const cnt = k => rows.filter(x => x.kind === k).length;
+    const freeN = rows.filter(x => x.price === 'free').length;
     msg.style.color = '#22d39a';
-    msg.textContent = '共 ' + r.total + ' 个模型（视觉 ' + vn + ' / 文本 ' + (r.text || []).length + '），已默认勾选视觉全部 + 文本前 5 个，可自行调整'
-      + (vn ? '' : '。⚠️ 该接口没返回任何视觉模型（部分平台如智谱的 /models 只列文本模型），视觉模型请在下方手动填写');
+    msg.textContent = '共 ' + r.total + ' 个模型（通用 ' + cnt('both') + ' / 视觉 ' + cnt('vision') + ' / 文本 ' + cnt('text') + '）'
+      + (freeN ? '，其中 ' + freeN + ' 个免费' : '')
+      + (r.priceFrom === 'api' ? '' : (r.priceFrom === 'name' ? '（价格按模型名推测）' : '（该平台未提供价格信息）'))
+      + '，已默认勾选通用+视觉全部 + 文本前 5 个，可自行调整'
+      + (vn || bn ? '' : '。⚠️ 该接口没返回任何视觉模型，视觉模型请在下方手动填写');
   };
   const mdOpenBtn = document.getElementById('mdOpenCfg');
   if (mdOpenBtn) mdOpenBtn.onclick = () => { try { window.api.openConfigFile(); } catch (e) {} };

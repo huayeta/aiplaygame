@@ -221,7 +221,6 @@ function createLibrary() {
       }
       return JSON.stringify(out);
     })()`).then(s => console.log('[dom-tree] ' + s)).catch(e => console.log('[dom-tree-err] ' + e));
-
   });
   libraryWin.on('closed', () => { libraryWin = null; });
 }
@@ -752,6 +751,10 @@ async function cdpTap(x, y) {
 async function doTap(x, y) {
   // 坐标统一换算：>1 视为绝对像素（旧脚本 / AI 视觉计划），否则视为 0~1 相对比例 → 按当前窗口实际尺寸换算
   let px = Number(x), py = Number(y);
+  if (!Number.isFinite(px) || !Number.isFinite(py)) {
+    console.log('[doTap] 非法坐标已跳过: x=' + x + ' y=' + y);
+    return false;
+  }
   let cw = GAME_W, ch = GAME_H;
   if (gameWin && !gameWin.isDestroyed()) {
     const s = gameWin.getContentSize();
@@ -761,8 +764,10 @@ async function doTap(x, y) {
   if (py <= 1) py *= ch;
   px = Math.max(0, Math.min(cw, Math.round(px)));
   py = Math.max(0, Math.min(ch, Math.round(py)));
+  console.log('[doTap] 模型坐标(' + x + ',' + y + ') → 像素(' + px + ',' + py + ') 窗口' + cw + 'x' + ch);
   if (auto.options.method === 'cdp') await cdpTap(px, py);
   else await softTap(px, py);
+  return true;
 }
 
 // ---------- 画面相似度（用于判定过关/切屏） ----------
@@ -1279,6 +1284,20 @@ ipcMain.on('tpl:capture', async () => {
 // ---------- AI 智能决策：逐步截图 → 视觉模型决策 → 执行（智谱主 / 商汤降级 + 重试） ----------
 // 与脚本回放（自动玩）互不影响：独立 playing 状态、独立启停；复用 doTap 的 0~1 相对坐标换算
 const aiAgent = { playing: false, abort: false, note: '' };
+// 从模型返回的 message 里取"正式回答"文本
+// 推理模型会把思考塞进 content、或把答案放进 reasoning_content；规则：谁身上有 JSON 就用谁，都没 JSON 时优先 content
+function pickModelText(msg) {
+  const pick = v => {
+    if (Array.isArray(v)) return v.map(p => (p && (p.text || p.content)) || '').join('');
+    return v == null ? '' : String(v);
+  };
+  const content = pick(msg && msg.content).trim();
+  const reasoning = pick(msg && (msg.reasoning_content || msg.reasoning)).trim();
+  const hasJson = s => /\{[\s\S]*\}/.test(s);
+  if (!hasJson(content) && hasJson(reasoning)) return reasoning;
+  if (!content && reasoning) return reasoning;
+  return content;
+}
 // 从模型回复提取 JSON（容忍 ```json 包裹与前后多余文字）
 function extractJson(s) {
   if (!s) return null;
@@ -1287,6 +1306,87 @@ function extractJson(s) {
   try { return JSON.parse(m[0]); } catch (e) {
     try { return JSON.parse(String(s).replace(/```json|```/gi, '').trim()); } catch (e2) { return null; }
   }
+}
+// 分析"模型未返回有效动作"的具体原因，便于排查（返回一句人话）
+function diagnoseBadAction(rawText, parsed) {
+  const t = String(rawText || '').trim();
+  if (!t) return '模型返回空内容';
+  if (!parsed) {
+    // 没解析出 JSON：区分"说的是人话"和"JSON 格式坏了"
+    if (/[\u4e00-\u9fa5]{4,}/.test(t) && !/[{\[]/.test(t)) return '返回的是自然语言而非 JSON：「' + t.slice(0, 60) + '」';
+    if (/[{\[]/.test(t)) return 'JSON 格式有误（括号/逗号不完整或被截断）：「' + t.slice(0, 60) + '」';
+    return '未找到 JSON：「' + t.slice(0, 60) + '」';
+  }
+  // 解析出了 JSON，但结构不对
+  if (parsed.actions === undefined) {
+    const keys = Object.keys(parsed).slice(0, 5).join(',');
+    return '缺少 actions 字段（实际字段：' + (keys || '无') + '）';
+  }
+  if (!Array.isArray(parsed.actions)) return 'actions 不是数组（类型 ' + typeof parsed.actions + '）';
+  if (!parsed.actions.length) {
+    const why = String(parsed.reasoning || parsed.note || '').trim();
+    return 'actions 为空，模型没给出可执行动作' + (why ? '（模型说：' + why.slice(0, 80) + '）' : '');
+  }
+  return '未知原因';
+}
+// 流式请求 chat/completions：只收集 content（正式答案），丢弃 reasoning_content（思考过程）
+// 推理模型的思考会占满 max_tokens，非流式时容易整段被截断；流式下两者是独立字段，可精准只取答案。
+// 返回 { ok, text, finish, truncated } 或 { ok:false, error, needRetryTemp }
+async function chatStreamOnce(url, key, body, timeoutMs = 120000) {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream', 'Authorization': 'Bearer ' + key },
+      body: JSON.stringify(Object.assign({}, body, { stream: true })),
+      signal: ac.signal
+    });
+    if (!r.ok) {
+      const txt = await r.text().catch(() => '');
+      let em = '';
+      try { const j = JSON.parse(txt); em = String((j && j.error && (j.error.message || j.error.code)) || ''); } catch (e) {}
+      return { ok: false, error: em || txt.slice(0, 200) || ('HTTP ' + r.status), needRetryTemp: /temperature/i.test(em || txt) };
+    }
+    // 服务端可能不支持流式而直接返回整包 JSON
+    const ct = String(r.headers.get('content-type') || '');
+    if (!/event-stream/i.test(ct)) {
+      const txt = await r.text().catch(() => '');
+      let j = null; try { j = JSON.parse(txt); } catch (e) {}
+      if (j && j.choices) {
+        const ch = j.choices[0] || {};
+        return { ok: true, text: pickModelText(ch.message || {}), finish: ch.finish_reason || '', truncated: ch.finish_reason === 'length' };
+      }
+      return { ok: false, error: '返回格式异常：' + txt.slice(0, 160) };
+    }
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '', content = '', finish = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop() || '';
+      for (const line of lines) {
+        const s = line.trim();
+        if (!s.startsWith('data:')) continue;
+        const data = s.slice(5).trim();
+        if (data === '[DONE]') continue;
+        let j = null; try { j = JSON.parse(data); } catch (e) { continue; }
+        const ch = (j.choices && j.choices[0]) || {};
+        const d = ch.delta || {};
+        // 关键：只累加 content，忽略 reasoning_content（思考过程）
+        const piece = typeof d.content === 'string' ? d.content
+          : (Array.isArray(d.content) ? d.content.map(p => (p && (p.text || '')) || '').join('') : '');
+        if (piece) content += piece;
+        if (ch.finish_reason) finish = ch.finish_reason;
+      }
+    }
+    return { ok: true, text: content.trim(), finish, truncated: finish === 'length' };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  } finally { clearTimeout(timer); }
 }
 // 单次视觉对话（OpenAI 兼容），返回 {ok,text,error}
 async function aiChatOnce(conf, imgB64, system, history, hintText) {
@@ -1305,37 +1405,23 @@ async function aiChatOnce(conf, imgB64, system, history, hintText) {
           ]
         }
       ],
-      max_tokens: 600, temperature: 0.3
+      max_tokens: 4096, temperature: 0.3
     };
-    if (/^glm/i.test(conf.model)) body.thinking = { type: 'disabled' }; // 智谱混合思考模型关闭思考，content 直接给正式回答
-    const send = async () => {
-      const r = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + conf.key },
-        body: JSON.stringify(body)
-      });
-      const j = await r.json().catch(() => null);
-      return { r, j };
-    };
-    let { r, j } = await send();
-    if (!r.ok) {
-      const em = String((j && j.error && (j.error.message || j.error.code)) || '');
-      // 部分模型（如商汤 kimi-k3）只接受 temperature=1：命中该提示就以 temperature=1 重试一次
-      if (/temperature/i.test(em) && body.temperature !== 1) {
-        body.temperature = 1;
-        ({ r, j } = await send());
-        if (!r.ok) return { ok: false, error: (j && j.error && (j.error.message || j.error.code)) || ('HTTP ' + r.status) };
-      } else {
-        return { ok: false, error: em || ('HTTP ' + r.status) };
-      }
+    // 尽量关闭"思考/推理"输出（能关就关，关不掉的推理模型靠下方流式只取 content 兜底）
+    if (/^glm/i.test(conf.model) || /reason/i.test(conf.model)) body.thinking = { type: 'disabled' };
+    body.reasoning_effort = 'none';
+    // 优先走流式：推理模型的思考会占满 max_tokens，非流式整段被截断拿不到 JSON；
+    // 流式下 reasoning_content 与 content 是两个独立字段，只累加 content 就能"直接拿结果"
+    let sr = await chatStreamOnce(url, conf.key, body);
+    // 部分服务（如商汤 kimi-k3）只接受 temperature=1：命中就用 1 重试一次
+    if (!sr.ok && sr.needRetryTemp && body.temperature !== 1) {
+      body.temperature = 1;
+      sr = await chatStreamOnce(url, conf.key, body);
     }
-    const msg = (j && j.choices && j.choices[0] && j.choices[0].message) || {};
-    let text = msg.content;
-    if (text == null || text === '') text = msg.reasoning_content;
-    if (Array.isArray(text)) text = text.map(p => (p && (p.text || p.content)) || '').join('');
-    text = String(text || '').trim();
-    if (!text) return { ok: false, error: '模型返回空内容' };
-    return { ok: true, text };
+    if (!sr.ok) return { ok: false, error: sr.error };
+    const text = String(sr.text || '').trim();
+    if (!text) return { ok: false, error: '模型返回空内容（只输出思考没有正式答案）' + (sr.finish ? '（finish_reason=' + sr.finish + '）' : '') };
+    return { ok: true, text, truncated: !!sr.truncated };
   } catch (err) { return { ok: false, error: String((err && err.message) || err) }; }
 }
 // 模型池逐级降级：智谱(主)视觉模型列表 → 商汤(降级)视觉模型列表；每个模型重试 N 次，失败自动切换下一个
@@ -1361,11 +1447,12 @@ async function aiVisionAsk(imgB64, system, history, hintText, pick) {
     pool = pool.filter(p => p.provider === pick.provider && p.model === pick.model);
     if (!pool.length) return { ok: false, error: '所选模型未配置 Key 或不可用' };
   }
-  if (!pool.length) return { ok: false, error: '未配置视觉模型 Key（需智谱或商汤任一）' };
+  if (!pool.length) return { ok: false, error: '未配置视觉模型（请在「🧩 模型配置」里为提供商填写视觉模型与 API Key）' };
   let lastErr = '未知错误';
   for (let pi = 0; pi < pool.length; pi++) {
     const item = pool[pi];
     for (let i = 1; i <= retry; i++) {
+      if (aiAgent.abort) return { ok: false, error: '已停止' }; // 用户停止 → 立刻放弃剩余重试
       const r = await aiChatOnce({ key: item.key, base: item.base, model: item.model }, imgB64, system, history, hintText);
       if (r.ok) return Object.assign(r, { used: item.tag + ' ' + item.model });
       lastErr = r.error;
@@ -1392,30 +1479,20 @@ async function aiTextOnce(conf, system, user) {
     const body = {
       model: conf.model,
       messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
-      max_tokens: 500, temperature: 0.3
+      max_tokens: 2048, temperature: 0.3
     };
-    if (/^glm/i.test(conf.model)) body.thinking = { type: 'disabled' };
-    const send = async () => {
-      const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + conf.key }, body: JSON.stringify(body) });
-      const j = await r.json().catch(() => null);
-      return { r, j };
-    };
-    let { r, j } = await send();
-    if (!r.ok) {
-      const em = String((j && j.error && (j.error.message || j.error.code)) || '');
-      if (/temperature/i.test(em) && body.temperature !== 1) {
-        body.temperature = 1;
-        ({ r, j } = await send());
-        if (!r.ok) return { ok: false, error: (j && j.error && (j.error.message || j.error.code)) || ('HTTP ' + r.status) };
-      } else return { ok: false, error: em || ('HTTP ' + r.status) };
+    // 尽量关闭思考；关不掉的推理模型靠流式只取 content 兜底（思考在 reasoning_content 里，不会混进答案）
+    if (/^glm/i.test(conf.model) || /reason/i.test(conf.model)) body.thinking = { type: 'disabled' };
+    body.reasoning_effort = 'none';
+    let sr = await chatStreamOnce(url, conf.key, body);
+    if (!sr.ok && sr.needRetryTemp && body.temperature !== 1) {
+      body.temperature = 1;
+      sr = await chatStreamOnce(url, conf.key, body);
     }
-    const msg = (j && j.choices && j.choices[0] && j.choices[0].message) || {};
-    let text = msg.content;
-    if (text == null || text === '') text = msg.reasoning_content;
-    if (Array.isArray(text)) text = text.map(p => (p && (p.text || p.content)) || '').join('');
-    text = String(text || '').trim();
-    if (!text) return { ok: false, error: '模型返回空内容' };
-    return { ok: true, text };
+    if (!sr.ok) return { ok: false, error: sr.error };
+    const text = String(sr.text || '').trim();
+    if (!text) return { ok: false, error: '模型返回空内容（只输出思考没有正式答案）' + (sr.finish ? '（finish_reason=' + sr.finish + '）' : '') };
+    return { ok: true, text, truncated: !!sr.truncated };
   } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
 }
 // 文本模型调用：pick 指定则只用它（不降级），否则按池顺序降级
@@ -1431,6 +1508,7 @@ async function aiTextAsk(system, user, pick) {
   let lastErr = '未知错误';
   for (const item of pool) {
     for (let i = 1; i <= retry; i++) {
+      if (aiAgent.abort) return { ok: false, error: '已停止' };
       const r = await aiTextOnce({ key: item.key, base: item.base, model: item.model }, system, user);
       if (r.ok) return Object.assign(r, { used: item.tag + ' ' + item.model });
       lastErr = r.error;
@@ -1444,8 +1522,8 @@ async function aiAgentLoop(cfg) {
   const game = readGames().find(g => g.id === auto.gameId);
   const rules = String((game && game.rules) || '').trim();
   const goal = String((cfg && cfg.text) || '').trim();
-  // 单次任务检测：指令含「一次/一下」且非持续类 → 执行完第一次点击即强制停止
-  const oneShot = (/一次|一下|点一下|按一下/.test(goal)) && !(/一直|持续|循环|不断|自动过关|通关|重复|连续|多(次|下)/.test(goal));
+  // 单次任务检测：指令含「一次/一下/点一下/单击」等且非持续类 → 执行完第一次点击即强制停止
+  const oneShot = (/一次|一下|单击|点一下|按一下|点一次|按一次|点这个|点那个/.test(goal)) && !(/一直|持续|循环|不断|自动过关|通关|重复|连续|多(次|下)/.test(goal));
   // 面板可选模型：形如 "zhipu:glm-4.6v-flash"，'auto'/空 = 走自动降级链路
   const parsePick = (id) => {
     const s = String(id || '').trim();
@@ -1469,11 +1547,14 @@ async function aiAgentLoop(cfg) {
       textPick
     );
     if (pr.ok) { plan = String(pr.text).replace(/\s+/g, ' ').slice(0, 400); setStatus('策略规划（' + pr.used + '）：' + plan, { aiPlaying: true }); }
-    else setStatus('策略规划失败（' + pr.error + '），直接开始视觉决策', { aiPlaying: true });
+    else if (!aiAgent.abort && pr.error !== '已停止') setStatus('策略规划失败（' + pr.error + '），直接开始视觉决策', { aiPlaying: true });
   } catch (e) { /* 规划失败不影响主流程 */ }
   if (aiAgent.abort) { aiAgent.playing = false; setStatus('AI 智能决策已停止', { aiPlaying: false }); return; }
   const system =
-    '你是H5小游戏自动操作员。游戏窗口尺寸 414x736，坐标用 0~1 相对比例（左上角为0,0）。' +
+    '你是H5小游戏自动操作员。你会收到当前游戏窗口的完整截图，坐标用 0~1 相对比例表示：x=0 是画面最左边、x=1 是最右边；y=0 是最上边、y=1 是最下边。' +
+    '定位方法（重要，请严格照做以对准小目标）：先在心里把画面横向切成 10 等份、纵向切成 10 等份，估出目标中心点落在第几份，再写成 0.05 精度的小数（如第 3 份中间 ≈ 0.25）；' +
+    '对于并排的按钮/按键（如数字键盘），务必确认目标是在第几个格子，左右相邻按钮中心通常只差 0.1 左右，看错一格就会点偏邻键；宁可多看一秒，不要点错目标。' +
+    'reasoning 里先说明「目标在画面中的位置描述」，再给出 tap 坐标。' +
     (rules ? '\n[游戏规则]\n' + rules : '') +
     (plan ? '\n[策略规划]\n' + plan : '') +
     '\n[当前任务]\n' + (goal || '自动游玩并尽量通关') +
@@ -1486,18 +1567,33 @@ async function aiAgentLoop(cfg) {
   let history = [];
   let stuck = 0;      // 画面连续无变化轮数
   let lastSig = null;
+  let badRounds = 0;  // 连续未返回有效动作的轮数（防死循环）
+  const MAX_BAD = 8;
   setStatus('AI 智能决策开始' + (rules ? '（已加载游戏规则）' : '（未填游戏规则，建议在游戏库编辑里填写）') + '：' + (goal || '自动游玩'), { aiPlaying: true });
   try {
     while (aiAgent.playing && !aiAgent.abort) {
       if (!gameWin || gameWin.isDestroyed()) { setStatus('游戏窗口已关闭，AI 停止', { aiPlaying: false }); aiAgent.playing = false; break; }
       const page = await gameWin.webContents.capturePage();
-      const small = page.resize({ width: 414, height: 736 }); // 压小省 token/延迟
-      const b64 = small.toJPEG(70).toString('base64');
+      // 等比缩放（不能强制拉伸成固定宽高）：否则画面变形，模型按变形图估的坐标换算回原图会左右偏移
+      const rawSz = page.getSize();
+      // 等比缩放：宽度上限 720（原来 414 太小，小键盘/数字按钮糊成一片，模型容易点偏相邻目标）
+      const TARGET_W = Math.min(720, rawSz.width || 720);
+      const scale = rawSz.width > 0 ? TARGET_W / rawSz.width : 1;
+      const small = page.resize({ width: TARGET_W, height: Math.max(1, Math.round(rawSz.height * scale)) });
+      const b64 = small.toJPEG(80).toString('base64');
       // 卡住提示：连续多轮画面几乎没变 → 告诉模型换策略（单次任务不发，避免误导重复点击已生效的目标）
+      // 签名复用本轮已截的图，避免再截一次（省时且保证和发给模型的是同一帧）
       let hint = '';
       if (!oneShot) {
-        const sig = await signature();
-        if (lastSig && sig) {
+        const tiny = page.resize({ width: 20, height: 36 });
+        const bmp = tiny.toBitmap();
+        const n = 20 * 36;
+        const sig = new Float32Array(n);
+        for (let i = 0; i < n; i++) {
+          const o = i * 4;
+          sig[i] = (0.299 * bmp[o] + 0.587 * bmp[o + 1] + 0.114 * bmp[o + 2]) / 255;
+        }
+        if (lastSig) {
           const sim = similarity(lastSig, sig);
           if (sim > 0.985) { stuck++; if (stuck >= 3) hint = '（提示：画面已连续' + stuck + '轮无明显变化，可能卡住了，请换策略、等待或 restart）'; }
           else stuck = 0;
@@ -1505,30 +1601,45 @@ async function aiAgentLoop(cfg) {
         lastSig = sig;
       }
       const res = await aiVisionAsk(b64, system, history, hint ? '请看当前游戏画面' + hint : undefined, visionPick);
+      if (aiAgent.abort) break; // 等待模型期间用户点了停止 → 立即退出，不再执行后续动作
       if (!res.ok) {
+        if (aiAgent.abort || res.error === '已停止') break;
         setStatus('视觉决策失败：' + res.error + '（本轮等待后重试）', { aiPlaying: true });
         await sleep(3000);
         continue;
       }
       const act = extractJson(res.text);
       if (!act || !Array.isArray(act.actions) || !act.actions.length) {
-        setStatus('模型未返回有效动作（' + (res.fallback ? '商汤' : '智谱') + '），等待后重试', { aiPlaying: true });
+        badRounds++;
+        let why = diagnoseBadAction(res.text, act);
+        if (res.truncated) why = '输出被长度上限截断，未生成完整 JSON（模型输出过长，可换非推理模型）｜' + why;
+        console.log('[ai-bad] 第' + badRounds + '次无效动作 | 原因: ' + why + ' | 原始返回: ' + String(res.text || '').slice(0, 300));
+        if (badRounds >= MAX_BAD) {
+          setStatus('模型连续 ' + badRounds + ' 轮未返回有效动作，已自动停止。最后原因：' + why + '（可换个模型或调整指令后重试）', { aiPlaying: false });
+          aiAgent.playing = false;
+          break;
+        }
+        setStatus('模型未返回有效动作（' + (res.used || '视觉模型') + '，' + badRounds + '/' + MAX_BAD + '）：' + why, { aiPlaying: true });
         await sleep(2500);
         continue;
       }
+      badRounds = 0;
       const who = res.used || '视觉模型';
-      setStatus('AI 看到：' + String(act.reasoning || act.note || '') + '（' + who + '）', { aiPlaying: true });
+      aiAgent.note = String(act.reasoning || act.note || '');
+      setStatus('AI 看到：' + (aiAgent.note || '') + '（' + who + '）', { aiPlaying: true });
       let tapped = false;
       for (const ac of act.actions.slice(0, 3)) {
         if (aiAgent.abort) break;
         if (ac.type === 'tap') {
-          await doTap(Number(ac.x), Number(ac.y));
+          const okTap = await doTap(ac.x, ac.y);
+          if (!okTap) { setStatus('模型给出非法坐标（x=' + ac.x + ', y=' + ac.y + '），已跳过本次点击', { aiPlaying: true }); }
           await sleep(600);
-          if (oneShot) { tapped = true; break; } // 单次任务：点完即停，不再执行后续动作
+          if (okTap && oneShot) { tapped = true; break; } // 单次任务：点完即停，不再执行后续动作
         }
         else if (ac.type === 'wait') { await sleep(Math.max(200, Number(ac.ms) || 500)); }
         else if (ac.type === 'restart') { if (gameWin && !gameWin.isDestroyed()) gameWin.webContents.reload(); await sleep(1200); }
       }
+      if (aiAgent.abort) break; // 动作执行期间被停止 → 结束主循环
       history = [{ role: 'assistant', content: res.text }]; // 轻量上下文：让模型记得自己上一步说了什么
       // 单次任务代码层兜底：执行过一次 tap 即强制停止，不依赖模型 done 判定（模型常不遵守）
       if (oneShot && tapped) { setStatus('AI 完成单次点击：' + String(act.reasoning || goal) + '（已点一次，停止）', { aiPlaying: false }); aiAgent.playing = false; break; }
@@ -1541,7 +1652,10 @@ async function aiAgentLoop(cfg) {
   setStatus(aiAgent.abort ? 'AI 智能决策已停止' : 'AI 智能决策结束', { aiPlaying: false });
 }
 ipcMain.on('aiAgent:start', (e, cfg) => {
-  if (aiAgent.playing) { setStatus('AI 智能决策已在运行，先停止再开始', { aiPlaying: true }); return; }
+  if (aiAgent.playing) {
+    setStatus(aiAgent.abort ? '正在停止上一轮，请稍候再启动' : 'AI 智能决策已在运行，先停止再开始', { aiPlaying: true });
+    return;
+  }
   if (auto.playing) { setStatus('脚本自动玩正在运行，请先停止', { aiPlaying: true }); return; }
   aiAgentLoop(cfg || {});
 });
@@ -1588,19 +1702,61 @@ ipcMain.handle('models:delete', (e, id) => {
   saveClientConfig({ aiChat: { customProviders: list } });
   return { ok: true };
 });
-// 判定某个模型是视觉模型还是文本模型：接口声明优先，模型名兜底（推测，可能不准）
+// 判定模型能力：'text' 纯文本 / 'vision' 纯视觉 / 'both' 两者都能
+// 兼容多种接口字段写法：input_modalities / modalities.input / capabilities / architecture.input_modalities，无则用模型名推测
 function classifyModelKind(m) {
-  const inm = Array.isArray(m && m.input_modalities) ? m.input_modalities.map(s => String(s).toLowerCase()) : null;
-  if (inm && inm.length) {
-    if (inm.includes('image') || inm.includes('vision') || inm.includes('video')) return 'vision';
+  const norm = a => (Array.isArray(a) ? a.map(s => String(s).toLowerCase()) : []);
+  const inm = norm(
+    (m && m.input_modalities) ||
+    (m && m.modalities && m.modalities.input) ||
+    (m && m.architecture && m.architecture.input_modalities) ||
+    (m && m.capabilities)
+  );
+  if (inm.length) {
+    const canImage = inm.includes('image') || inm.includes('vision') || inm.includes('video') || inm.includes('multimodal');
+    const canText = inm.includes('text');
+    if (canImage && canText) return 'both';
+    if (canImage) return 'vision';
     return 'text';
   }
-  // 名字兜底：glm-4.6v-flash / *-vl- / Qwen2.5-VL / *-vision / OCR / omni 等判为视觉
+  // 名字兜底：glm-4.6v-flash / *-vl- / Qwen2.5-VL / *-vision / OCR / omni 等判为多模态（通常也能处理纯文本）
   const id = String((m && (m.id || m.name || m.model)) || '').toLowerCase();
-  if (/(-v\b|-v-|-vl-|\bvl\b|vision|multimodal|omni|ocr|\d+v\b|[0-9]v[-_]|[0-9]\.?[0-9]?v\b)/i.test(id)) return 'vision';
+  if (/(-v\b|-v-|-vl-|\bvl\b|vision|multimodal|omni|ocr|\d+v\b|[0-9]v[-_]|[0-9]\.?[0-9]?v\b)/i.test(id)) return 'both';
   return 'text';
 }
-// 拉取某提供商的可用模型列表，并区分文本/视觉
+// 判定模型是否免费：'free' 明确免费 / 'paid' 明确收费 / '' 未知
+// 依据：接口 pricing 字段优先（各家写法不同，常见 pricing / pricing.prompt+completion）；
+//      同时兼容 openrouter 风格的 pricing 字符串键；无价格信息时用名字里的 free 兜底推测
+function classifyModelPrice(m) {
+  const p = (m && (m.pricing || (m.architecture && m.architecture.pricing))) || null;
+  if (p && typeof p === 'object') {
+    // 收集所有数值型价格项（单位可能是 $/token 或 $/1M token，只要全是 0 就视为免费）
+    const nums = [];
+    for (const k of Object.keys(p)) {
+      const v = p[k];
+      if (v === null || v === undefined) continue;
+      const n = Number(v);
+      if (!Number.isNaN(n) && String(v).trim() !== '') nums.push(n);
+      else if (typeof v === 'object') { // 嵌套写法：{prompt:{price:...}}
+        for (const k2 of Object.keys(v)) { const n2 = Number(v[k2]); if (!Number.isNaN(n2)) nums.push(n2); }
+      }
+    }
+    if (nums.length) return nums.every(n => n === 0) ? 'free' : 'paid';
+  }
+  // 无价格信息：名字/display_name 里带 free 的当免费（推测，界面会标注）
+  const id = String((m && (m.id || m.name || m.model)) || '').toLowerCase();
+  const disp = String((m && (m.display_name || m.magpie_label)) || '').toLowerCase();
+  if (/(^|[/_-])free([/_-]|$)|\bfree\b|免费/.test(id) || /免费/.test(disp)) return 'free';
+  return '';
+}
+// 接口是否真的给了价格字段（用于区分"接口明确免费"和"仅按名字推测免费"）
+function hasRealPricing(arr) {
+  return arr.some(m => {
+    const p = m && (m.pricing || (m.architecture && m.architecture.pricing));
+    return p && typeof p === 'object' && Object.keys(p).length > 0;
+  });
+}
+// 拉取某提供商的可用模型列表，并区分文本 / 视觉 / 两者皆可，同时标注是否免费
 ipcMain.handle('models:fetchList', async (e, p) => {
   const base = String((p && p.base) || '').replace(/\/+$/, '');
   const key = String((p && p.key) || '');
@@ -1613,13 +1769,19 @@ ipcMain.handle('models:fetchList', async (e, p) => {
     let j = null; try { j = JSON.parse(txt); } catch (err) {}
     const arr = Array.isArray(j) ? j : (j && Array.isArray(j.data) ? j.data : null);
     if (!arr) return { ok: false, error: r.ok ? '返回格式无法识别（不是 {data:[...]}）' : ('HTTP ' + r.status + ' ' + txt.slice(0, 120)) };
-    const text = [], vision = [];
+    const items = [];
+    let priceKnown = false, freeCount = 0;
     for (const m of arr) {
       const id = m && (m.id || m.name || m.model);
       if (!id) continue;
-      (classifyModelKind(m) === 'vision' ? vision : text).push(String(id));
+      const price = classifyModelPrice(m);
+      if (price) priceKnown = true;
+      if (price === 'free') freeCount++;
+      items.push({ id: String(id), kind: classifyModelKind(m), price });
     }
-    return { ok: true, text, vision, total: text.length + vision.length };
+    // 价格信息来源：'api' 接口明确给出 / 'name' 仅按名字推测 / '' 完全未知
+    const priceFrom = items.some(x => x.price) ? (hasRealPricing(arr) ? 'api' : 'name') : '';
+    return { ok: true, items, priceFrom, freeCount, total: items.length };
   } catch (err) {
     return { ok: false, error: String((err && err.message) || err) };
   } finally { clearTimeout(timer); }
@@ -1795,10 +1957,7 @@ ipcMain.handle('ai:chat', async (_e, cfg) => {
     const j = await r.json().catch(() => null);
     if (!r.ok) return { ok: false, error: (j && j.error && j.error.message) || ('HTTP ' + r.status) };
     const msg = (j && j.choices && j.choices[0] && j.choices[0].message) || {};
-    let text = msg.content;
-    if (text == null || text === '') text = msg.reasoning_content;
-    if (Array.isArray(text)) text = text.map(p => (p && (p.text || p.content)) || '').join('');
-    text = String(text || '').trim();
+    const text = pickModelText(msg);
     return { ok: true, text };
   } catch (err) { return { ok: false, error: String((err && err.message) || err) }; }
 });
