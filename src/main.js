@@ -51,7 +51,7 @@ const auto = {
   lastTapTime: 0,
   abort: false,
   highlight: 0, // 当前正在测试/推进的关（1 基，0=无）
-  options: { method: 'cdp', speed: 1, loop: true, threshold: 0.9, autoMark: false, freshStart: false }
+  options: { method: 'cdp', speed: 1, loop: true, threshold: 0.9, autoMark: false, freshStart: false, aiCmd: '', aiTextModel: '', aiVisionModel: '' }
 };
 const DEFAULT_OPTIONS = Object.assign({}, auto.options); // 自动玩默认配置（未单独设置的游戏用它）
 
@@ -1284,6 +1284,10 @@ ipcMain.on('tpl:capture', async () => {
 // ---------- AI 智能决策：逐步截图 → 视觉模型决策 → 执行（智谱主 / 商汤降级 + 重试） ----------
 // 与脚本回放（自动玩）互不影响：独立 playing 状态、独立启停；复用 doTap 的 0~1 相对坐标换算
 const aiAgent = { playing: false, abort: false, note: '' };
+// 思考预算：推理模型的思考内容会挤占 max_tokens，一旦占满就 finish_reason=length 且 content 为空。
+// 视觉任务需分析整幅画面，思考量最大，给足额度；文本任务相对小。
+const VISION_MAX_TOKENS = 16384;
+const TEXT_MAX_TOKENS = 8192;
 // 从模型返回的 message 里取"正式回答"文本
 // 推理模型会把思考塞进 content、或把答案放进 reasoning_content；规则：谁身上有 JSON 就用谁，都没 JSON 时优先 content
 function pickModelText(msg) {
@@ -1405,7 +1409,8 @@ async function aiChatOnce(conf, imgB64, system, history, hintText) {
           ]
         }
       ],
-      max_tokens: 4096, temperature: 0.3
+      // 视觉任务思考量最大（要看整个画面做布局分析），给足上限，避免思考占满后答案为空
+      max_tokens: VISION_MAX_TOKENS, temperature: 0.3
     };
     // 尽量关闭"思考/推理"输出（能关就关，关不掉的推理模型靠下方流式只取 content 兜底）
     if (/^glm/i.test(conf.model) || /reason/i.test(conf.model)) body.thinking = { type: 'disabled' };
@@ -1419,8 +1424,18 @@ async function aiChatOnce(conf, imgB64, system, history, hintText) {
       sr = await chatStreamOnce(url, conf.key, body);
     }
     if (!sr.ok) return { ok: false, error: sr.error };
-    const text = String(sr.text || '').trim();
-    if (!text) return { ok: false, error: '模型返回空内容（只输出思考没有正式答案）' + (sr.finish ? '（finish_reason=' + sr.finish + '）' : '') };
+    let text = String(sr.text || '').trim();
+    // 思考占满长度上限、正式答案没来得及输出 → 收回额度再要一次，并催它直出结论
+    if (!text && sr.finish === 'length') {
+      const retryBody = Object.assign({}, body, {
+        max_tokens: Math.max(body.max_tokens, VISION_MAX_TOKENS),
+        messages: body.messages.map((m, i) =>
+          i === 0 ? Object.assign({}, m, { content: m.content + '\n注意：不要长篇推理，直接按格式输出 JSON 结论，思考控制在极简。' }) : m)
+      });
+      const sr2 = await chatStreamOnce(url, conf.key, retryBody);
+      if (sr2.ok && String(sr2.text || '').trim()) { text = String(sr2.text).trim(); sr = sr2; }
+    }
+    if (!text) return { ok: false, error: '模型返回空内容（思考占满了长度上限，没来得及输出正式答案）' + (sr.finish ? '（finish_reason=' + sr.finish + '）' : '') };
     return { ok: true, text, truncated: !!sr.truncated };
   } catch (err) { return { ok: false, error: String((err && err.message) || err) }; }
 }
@@ -1479,7 +1494,7 @@ async function aiTextOnce(conf, system, user) {
     const body = {
       model: conf.model,
       messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
-      max_tokens: 2048, temperature: 0.3
+      max_tokens: TEXT_MAX_TOKENS, temperature: 0.3
     };
     // 尽量关闭思考；关不掉的推理模型靠流式只取 content 兜底（思考在 reasoning_content 里，不会混进答案）
     if (/^glm/i.test(conf.model) || /reason/i.test(conf.model)) body.thinking = { type: 'disabled' };

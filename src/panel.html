@@ -21,6 +21,9 @@
   .mute { background: #3a3d63; }
   .mute.on { background: linear-gradient(135deg,#ff5ca8,#e11d48); }
   .txt { width: 100%; box-sizing: border-box; padding: 9px; border-radius: 8px; background: #0f1020; color: #e8e9f5; border: 1px solid #2a2d52; margin-bottom: 8px; font-size: 13px; }
+  /* AI 指令输入框：多行文本框，写长指令更舒服；可纵向拖动调整高度 */
+  .aiCmdBox { resize: vertical; min-height: 66px; max-height: 200px; line-height: 1.55; font-family: inherit; display: block; }
+  .aiCmdBox:focus { outline: none; border-color: #7c5cff; }
   .aiRow { display: flex; gap: 8px; }
   .aiRow button { flex: 1; }
   .aiGo { background: linear-gradient(135deg,#7c5cff,#5a3fd6); }
@@ -33,7 +36,7 @@
   select, input[type=range] { width: 130px; }
   select { padding: 6px; border-radius: 8px; background: #0f1020; color: #e8e9f5; border: 1px solid #2a2d52; }
   .check { display: flex; align-items: center; gap: 8px; font-size: 13px; margin-bottom: 8px; }
-  .status { background: #0f1020; border-radius: 10px; padding: 10px 12px; font-size: 12px; line-height: 1.6; min-height: 46px; max-height: 220px; overflow-y: auto; }
+  .status { background: #0f1020; border-radius: 10px; padding: 10px 12px; font-size: 12px; line-height: 1.6; min-height: 120px; max-height: 320px; overflow-y: auto; }
   .status-item { display: block; word-break: break-all; }
   .status-item .st-time { color: #6b7280; margin-right: 6px; font-size: 11px; }
   .status-empty { color: #6b7280; }
@@ -83,11 +86,13 @@
 
   <div class="sec">
     <div class="t">AI 智能决策（说一句，AI 看画面自己玩）</div>
-    <input class="txt" id="aiCmd" placeholder="例如：帮我一直点开始按钮 / 自动过关">
+    <textarea class="txt aiCmdBox" id="aiCmd" rows="3" placeholder="例如：帮我一直点开始按钮 / 自动过关 / 点击键盘上面的数字3一次"></textarea>
     <div class="row" style="margin-bottom:6px;"><span style="flex:none;width:56px;color:#9aa0c8;font-size:12px;">文本模型</span><select id="aiTextModel" style="flex:1;width:auto;"></select></div>
     <div class="row" style="margin-bottom:8px;"><span style="flex:none;width:56px;color:#9aa0c8;font-size:12px;">视觉模型</span><select id="aiVisionModel" style="flex:1;width:auto;"></select></div>
     <div class="aiRow"><button class="aiGo" id="aiGo">▶ AI 开始</button><button class="aiStopBtn" id="aiStopCtl" disabled>■ 停止</button></div>
     <div class="hint" id="aiNote">AI 每步截取游戏画面，让所选视觉模型决策（模型来自「🧩 模型配置」页，选「自动」则按配置顺序降级重试）。游戏规则在「游戏库 → 编辑游戏 → 游戏规则」里填写，填了 AI 更懂怎么玩。</div>
+    <div class="t" style="margin-top:12px;">状态（记录变化过程，最新在最上）<button class="clearSt" id="clearStatus">清空</button></div>
+    <div class="status" id="statusList"><span class="status-item status-empty">等待操作…</span></div>
   </div>
 
   <div class="sec">
@@ -115,11 +120,6 @@
     <div class="hint">「总是重新开始新游戏」开=每次打开都从第1关开始；关=默认继续上次存档。不再弹窗询问。软点击失效时改 CDP；速度仅缩短点击间隔。</div>
   </div>
 
-  <div class="sec">
-    <div class="t">状态（记录变化过程，最新在最上）<button class="clearSt" id="clearStatus">清空</button></div>
-    <div class="status" id="statusList"><span class="status-item status-empty">等待操作…</span></div>
-  </div>
-
 <script>
   const $ = id => document.getElementById(id);
   $('recStart').onclick = () => window.panel.recStart();
@@ -140,6 +140,7 @@
     if (btn.classList.contains('running')) { window.panel.aiStop(); return; }
     const text = $('aiCmd').value.trim();
     if (!text) { $('aiNote').textContent = '请先输入指令，例如：帮我一直点开始按钮'; return; }
+    saveAiInputs(); // 启动前再存一次，确保指令不丢
     clearStatusList(); // 确认启动 AI 前先清空状态栏，之后只累积本次运行的状态
     btn.textContent = '正在启动…';
     btn.classList.add('running');
@@ -147,6 +148,20 @@
     window.panel.aiStart({ text, textModel: $('aiTextModel').value, visionModel: $('aiVisionModel').value });
   };
   $('aiStopCtl').onclick = () => window.panel.aiStop();
+  // 指令输入框内容持久化（存到该游戏的 autoplay 配置里，重开控制台自动回填）
+  let aiSaveTimer = null;
+  function saveAiInputs() {
+    window.panel.setOption({ aiCmd: $('aiCmd').value });
+  }
+  $('aiCmd').addEventListener('input', () => {
+    clearTimeout(aiSaveTimer);
+    aiSaveTimer = setTimeout(saveAiInputs, 400); // 防抖，避免每敲一个字都写盘
+  });
+  $('aiCmd').addEventListener('blur', saveAiInputs);
+  // Ctrl/Cmd + Enter 快速开始
+  $('aiCmd').addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); $('aiGo').click(); }
+  });
   $('method').onchange = e => window.panel.setOption({ method: e.target.value });
   $('speed').oninput = e => {
     const v = parseFloat(e.target.value);
@@ -165,6 +180,8 @@
     if (opts.loop !== undefined) $('loop').checked = !!opts.loop;
     if (opts.autoMark !== undefined) $('autoMark').checked = !!opts.autoMark;
     if (opts.freshStart !== undefined) $('freshAlways').checked = !!opts.freshStart;
+    // 恢复上次输入的 AI 指令（按游戏独立保存）
+    if (opts.aiCmd) $('aiCmd').value = opts.aiCmd;
   });
 
   // 关卡管理（实时更新，每次动作自动刷新）
@@ -257,7 +274,16 @@
     };
     fill($('aiTextModel'), r.text);
     fill($('aiVisionModel'), r.vision);
+    // 模型列表就绪后，恢复上次选中的模型（等选项填充完再设值，否则会失效）
+    window.panel.getOption().then(opts => {
+      if (!opts) return;
+      if (opts.aiTextModel) $('aiTextModel').value = opts.aiTextModel;
+      if (opts.aiVisionModel) $('aiVisionModel').value = opts.aiVisionModel;
+    });
   });
+  // 切换模型即记住，下次打开沿用
+  $('aiTextModel').onchange = e => window.panel.setOption({ aiTextModel: e.target.value });
+  $('aiVisionModel').onchange = e => window.panel.setOption({ aiVisionModel: e.target.value });
 </script>
 </body>
 </html>
