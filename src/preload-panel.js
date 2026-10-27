@@ -21,5 +21,6 @@ contextBridge.exposeInMainWorld('panel', {
   scriptDeleteLevel: (idx) => ipcRenderer.send('script:deleteLevel', idx),
   scriptTest: (idx) => ipcRenderer.send('script:test', idx),
   onStatus: (cb) => ipcRenderer.on('status', (e, data) => cb(data)),
+  onThinking: (cb) => ipcRenderer.on('ai-thinking', (e, data) => cb(data)),
   onLevels: (cb) => ipcRenderer.on('levels', (e, data) => cb(data))
 });

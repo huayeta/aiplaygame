@@ -171,6 +171,19 @@ function setStatus(text, extra = {}) {
     panelWin.webContents.send('status', { text, ...extra, phase: auto.phase || '', recording: auto.recording, playing: auto.playing });
   }
 }
+// 实时思考摘要通道：单独事件，面板只刷新"正在思考"那一行（不追加历史），避免每个 token 刷屏
+let lastThinkPush = 0;
+let lastThinkText = '';
+function pushThinking(text, model) {
+  const now = Date.now();
+  const t = String(text || '');
+  if (now - lastThinkPush < 120 && t.length - lastThinkText.length < 12) return; // 节流：够快就刷，避免卡顿也不刷屏
+  lastThinkPush = now;
+  lastThinkText = t;
+  if (panelWin && !panelWin.isDestroyed()) {
+    panelWin.webContents.send('ai-thinking', { text: t, model: model || '' });
+  }
+}
 
 // ---------- 游戏库窗口 ----------
 function createLibrary() {
@@ -1288,6 +1301,9 @@ const aiAgent = { playing: false, abort: false, note: '' };
 // 视觉任务需分析整幅画面，思考量最大，给足额度；文本任务相对小。
 const VISION_MAX_TOKENS = 16384;
 const TEXT_MAX_TOKENS = 8192;
+// 请求超时：看图 + 推理本身更慢，给视觉更长时间；超时会中止并提示"等待超时"
+const VISION_TIMEOUT_MS = 180000; // 3 分钟
+const TEXT_TIMEOUT_MS = 90000;    // 1.5 分钟
 // 从模型返回的 message 里取"正式回答"文本
 // 推理模型会把思考塞进 content、或把答案放进 reasoning_content；规则：谁身上有 JSON 就用谁，都没 JSON 时优先 content
 function pickModelText(msg) {
@@ -1336,7 +1352,7 @@ function diagnoseBadAction(rawText, parsed) {
 // 流式请求 chat/completions：只收集 content（正式答案），丢弃 reasoning_content（思考过程）
 // 推理模型的思考会占满 max_tokens，非流式时容易整段被截断；流式下两者是独立字段，可精准只取答案。
 // 返回 { ok, text, finish, truncated } 或 { ok:false, error, needRetryTemp }
-async function chatStreamOnce(url, key, body, timeoutMs = 120000) {
+async function chatStreamOnce(url, key, body, timeoutMs = 120000, onReasoning) {
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
   try {
@@ -1365,7 +1381,7 @@ async function chatStreamOnce(url, key, body, timeoutMs = 120000) {
     }
     const reader = r.body.getReader();
     const dec = new TextDecoder();
-    let buf = '', content = '', finish = '';
+    let buf = '', content = '', finish = '', reasoning = '';
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -1380,16 +1396,33 @@ async function chatStreamOnce(url, key, body, timeoutMs = 120000) {
         let j = null; try { j = JSON.parse(data); } catch (e) { continue; }
         const ch = (j.choices && j.choices[0]) || {};
         const d = ch.delta || {};
-        // 关键：只累加 content，忽略 reasoning_content（思考过程）
+        // content = 正式答案；reasoning_content = 思考过程（单独累加，可用于界面实时展示）
         const piece = typeof d.content === 'string' ? d.content
           : (Array.isArray(d.content) ? d.content.map(p => (p && (p.text || '')) || '').join('') : '');
         if (piece) content += piece;
+        const rp = typeof d.reasoning_content === 'string' ? d.reasoning_content
+          : (typeof d.reasoning === 'string' ? d.reasoning : '');
+        if (rp) {
+          reasoning += rp;
+          // 边收边回调，让界面能实时显示"模型正在想什么"（节流由调用方控制）
+          if (typeof onReasoning === 'function') { try { onReasoning(rp, reasoning); } catch (e) {} }
+        }
         if (ch.finish_reason) finish = ch.finish_reason;
       }
     }
-    return { ok: true, text: content.trim(), finish, truncated: finish === 'length' };
+    return { ok: true, text: content.trim(), reasoning: reasoning.trim(), finish, truncated: finish === 'length' };
   } catch (e) {
-    return { ok: false, error: String((e && e.message) || e) };
+    const msg = String((e && e.message) || e);
+    // 超时是我们自己 abort 的，把底层英文错误翻译成人话，避免误以为是"模型繁忙"
+    if (ac.signal.aborted || /aborted|abort/i.test(msg)) {
+      return {
+        ok: false,
+        error: '等待超时（超过 ' + Math.round(timeoutMs / 1000) + ' 秒没有返回完整结果）。' +
+          '常见原因：网络慢、中转站上游卡住、或所选推理模型思考过长。可重试，或换更快的模型',
+        timeout: true
+      };
+    }
+    return { ok: false, error: msg };
   } finally { clearTimeout(timer); }
 }
 // 单次视觉对话（OpenAI 兼容），返回 {ok,text,error}
@@ -1417,13 +1450,15 @@ async function aiChatOnce(conf, imgB64, system, history, hintText) {
     body.reasoning_effort = 'none';
     // 优先走流式：推理模型的思考会占满 max_tokens，非流式整段被截断拿不到 JSON；
     // 流式下 reasoning_content 与 content 是两个独立字段，只累加 content 就能"直接拿结果"
-    let sr = await chatStreamOnce(url, conf.key, body);
+    const thinkCb = (chunk, all) => pushThinking(all, conf.tag || conf.model);
+    let sr = await chatStreamOnce(url, conf.key, body, VISION_TIMEOUT_MS, thinkCb);
     // 部分服务（如商汤 kimi-k3）只接受 temperature=1：命中就用 1 重试一次
     if (!sr.ok && sr.needRetryTemp && body.temperature !== 1) {
       body.temperature = 1;
-      sr = await chatStreamOnce(url, conf.key, body);
+      sr = await chatStreamOnce(url, conf.key, body, VISION_TIMEOUT_MS, thinkCb);
     }
-    if (!sr.ok) return { ok: false, error: sr.error };
+    lastThinkText = ''; // 本轮思考结束，下一轮重新开始
+    if (!sr.ok) { pushThinking('', ''); return { ok: false, error: sr.error }; }
     let text = String(sr.text || '').trim();
     // 思考占满长度上限、正式答案没来得及输出 → 收回额度再要一次，并催它直出结论
     if (!text && sr.finish === 'length') {
@@ -1471,7 +1506,11 @@ async function aiVisionAsk(imgB64, system, history, hintText, pick) {
       const r = await aiChatOnce({ key: item.key, base: item.base, model: item.model }, imgB64, system, history, hintText);
       if (r.ok) return Object.assign(r, { used: item.tag + ' ' + item.model });
       lastErr = r.error;
-      if (i < retry) { setStatus(item.tag + '「' + item.model + '」繁忙（' + r.error + '），重试 ' + i + '/' + retry + '…', { aiPlaying: true }); await sleep(gap); }
+      if (i < retry) {
+        const why = r.timeout ? '响应超时' : '调用失败';
+        setStatus(item.tag + '「' + item.model + '」' + why + '（' + r.error + '），重试 ' + i + '/' + retry + '…', { aiPlaying: true });
+        await sleep(gap);
+      }
     }
     if (pi < pool.length - 1) setStatus(item.tag + '「' + item.model + '」失败，切换下一个模型…', { aiPlaying: true });
   }
@@ -1499,10 +1538,10 @@ async function aiTextOnce(conf, system, user) {
     // 尽量关闭思考；关不掉的推理模型靠流式只取 content 兜底（思考在 reasoning_content 里，不会混进答案）
     if (/^glm/i.test(conf.model) || /reason/i.test(conf.model)) body.thinking = { type: 'disabled' };
     body.reasoning_effort = 'none';
-    let sr = await chatStreamOnce(url, conf.key, body);
+    let sr = await chatStreamOnce(url, conf.key, body, TEXT_TIMEOUT_MS);
     if (!sr.ok && sr.needRetryTemp && body.temperature !== 1) {
       body.temperature = 1;
-      sr = await chatStreamOnce(url, conf.key, body);
+      sr = await chatStreamOnce(url, conf.key, body, TEXT_TIMEOUT_MS);
     }
     if (!sr.ok) return { ok: false, error: sr.error };
     const text = String(sr.text || '').trim();
