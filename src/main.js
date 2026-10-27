@@ -51,7 +51,7 @@ const auto = {
   lastTapTime: 0,
   abort: false,
   highlight: 0, // 当前正在测试/推进的关（1 基，0=无）
-  options: { method: 'cdp', speed: 1, loop: true, threshold: 0.9, autoMark: false, freshStart: false, aiCmd: '', aiTextModel: '', aiVisionModel: '' }
+  options: { method: 'cdp', speed: 1, loop: true, threshold: 0.9, autoMark: false, freshStart: false, aiCmd: '', aiTextModel: '', aiVisionModel: '', aiHiRes: false }
 };
 const DEFAULT_OPTIONS = Object.assign({}, auto.options); // 自动玩默认配置（未单独设置的游戏用它）
 
@@ -761,6 +761,30 @@ async function cdpTap(x, y) {
   await dbg.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
 }
 
+// 取点击坐标（0~1 相对比例）。优先级：
+// ① box 边界框 [左,上,右,下] → 取四边中点（模型判断"目标四边在哪"比判断"中心在哪"更准，四边平均能抵掉单边误差）
+// ② 旧式 x/y → 直用（兼容）
+function actionXY(ac) {
+  const box = ac && ac.box;
+  if (Array.isArray(box) && box.length >= 4) {
+    let x1 = Number(box[0]), y1 = Number(box[1]), x2 = Number(box[2]), y2 = Number(box[3]);
+    if ([x1, y1, x2, y2].every(Number.isFinite)) {
+      // 模型有时返回像素坐标而非 0~1 比例：若任一值 >1 且整体像像素（如 569/1303），按图片尺寸归一到 0~1
+      if (x1 > 1 || y1 > 1 || x2 > 1 || y2 > 1) {
+        const w = aiAgent.lastImgW || 0, h = aiAgent.lastImgH || 0;
+        if (w > 1 && h > 1) { x1 /= w; x2 /= w; y1 /= h; y2 /= h; }
+        else return { x: Number(ac.x), y: Number(ac.y), via: 'xy' }; // 无尺寸参考，无法换算
+      }
+      // 归一后仍须落在 0~1，否则视为无效框
+      if ([x1, y1, x2, y2].every(n => n >= 0 && n <= 1)) {
+        const lx = Math.min(x1, x2), rx = Math.max(x1, x2), ty = Math.min(y1, y2), by = Math.max(y1, y2);
+        const cx = (lx + rx) / 2, cy = (ty + by) / 2;
+        return { x: Math.round(cx * 10000) / 10000, y: Math.round(cy * 10000) / 10000, via: 'box' };
+      }
+    }
+  }
+  return { x: Number(ac && ac.x), y: Number(ac && ac.y), via: 'xy' };
+}
 async function doTap(x, y) {
   // 坐标统一换算：>1 视为绝对像素（旧脚本 / AI 视觉计划），否则视为 0~1 相对比例 → 按当前窗口实际尺寸换算
   let px = Number(x), py = Number(y);
@@ -787,21 +811,57 @@ async function doTap(x, y) {
 async function signature() {
   if (!gameWin || gameWin.isDestroyed()) return null;
   const page = await gameWin.webContents.capturePage();
-  const small = page.resize({ width: 20, height: 36 });
-  const bmp = small.toBitmap();
-  const n = 20 * 36;
-  const g = new Float32Array(n);
-  for (let i = 0; i < n; i++) {
-    const o = i * 4;
-    g[i] = (0.299 * bmp[o] + 0.587 * bmp[o + 1] + 0.114 * bmp[o + 2]) / 255;
-  }
-  return g;
+  return signatureOf(page);
 }
 function similarity(a, b) {
   if (!a || !b) return 1;
   let s = 0;
   for (let i = 0; i < a.length; i++) s += 1 - Math.abs(a[i] - b[i]);
   return s / a.length;
+}
+// 点击后校验：轮询截图，直到画面相对 before 明显变化或超时，返回是否变化
+// 注意：CDP 点击本身几乎总是成功的（能到达页面 DOM/Canvas）。
+// 画面"没变化"可能只是这一下没有视觉反馈（点空白、等输入、动画已结束），
+// 所以这里只回答"画面有没有视觉变化"，不能等同于"点击失败"。
+async function waitScreenChange(before, timeoutMs = 4000) {
+  if (!gameWin || gameWin.isDestroyed() || !before) return true; // 拿不到基准就当作已变化，避免误报
+  const base = signatureOf(before);
+  const t0 = Date.now();
+  // 采样更密集、观察窗口更长：输入框/按钮常有 300~800ms 的渐显动画，
+  // 采样太稀会正好错过峰值，把"其实生效了"误判成"没变化"。
+  let maxDiff = 0;
+  while (Date.now() - t0 < timeoutMs) {
+    if (aiAgent.abort) return true;
+    if (!gameWin || gameWin.isDestroyed()) return true;
+    try {
+      const now = await gameWin.webContents.capturePage();
+      const sig = signatureOf(now);
+      if (base && sig) {
+        const sim = similarity(base, sig);
+        const diff = 1 - sim;
+        if (diff > maxDiff) maxDiff = diff;
+        if (sim < TAP_CHANGE_SIM) return true; // 任一时刻达到变化阈值就判定生效
+      }
+    } catch (e) { return true; }
+    await sleep(150); // 密集采样
+  }
+  // 没达到阈值也记录一下最大差异，便于排查是否阈值偏严
+  if (maxDiff > 0) console.log('[screen-change] 未达阈值，窗口内最大差异=' + maxDiff.toFixed(5) + '（阈值 ' + (1 - TAP_CHANGE_SIM).toFixed(5) + '）');
+  return false; // 超时无视觉变化
+}
+// 从已截好的 NativeImage 算灰度指纹（20x36），避免重复截图
+const SIG_W = 96, SIG_H = 172; // 采样分辨率：提高后"只变一个格子"的变化也能占到更多采样点，不易漏检
+function signatureOf(page) {
+  if (!page) return null;
+  const tiny = page.resize({ width: SIG_W, height: SIG_H });
+  const bmp = tiny.toBitmap();
+  const n = SIG_W * SIG_H;
+  const sig = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const o = i * 4;
+    sig[i] = (0.299 * bmp[o] + 0.587 * bmp[o + 1] + 0.114 * bmp[o + 2]) / 255;
+  }
+  return sig;
 }
 async function waitForChange(threshold, timeout = 8000) {
   const start = await signature();
@@ -1216,7 +1276,11 @@ function loadClientConfig(){
   try {
     if (fs.existsSync(CONFIG_PATH)) {
       const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-      clientConfig = { version: 1, aiChat: Object.assign({}, DEFAULT_CONFIG.aiChat, (raw.aiChat || {})) };
+      // 保留所有顶层分区（aiChat / tts / danmaku 等），不要只挑 aiChat——否则其他配置每次都会被丢弃
+      clientConfig = Object.assign({}, raw, {
+        version: 1,
+        aiChat: Object.assign({}, DEFAULT_CONFIG.aiChat, (raw.aiChat || {}))
+      });
       fromFile = true;
     } else {
       clientConfig = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
@@ -1296,7 +1360,12 @@ ipcMain.on('tpl:capture', async () => {
 
 // ---------- AI 智能决策：逐步截图 → 视觉模型决策 → 执行（智谱主 / 商汤降级 + 重试） ----------
 // 与脚本回放（自动玩）互不影响：独立 playing 状态、独立启停；复用 doTap 的 0~1 相对坐标换算
-const aiAgent = { playing: false, abort: false, note: '' };
+const aiAgent = { playing: false, abort: false, note: '', lastImgW: 0, lastImgH: 0 };
+let lastTapFeedback = ''; // 上一轮点击"可能没点中"的反馈，下一轮提示词带上
+let tapHistory = [];      // 最近几轮的点击记录（供上下文参考）
+let levelCount = 0;         // 连续过关计数（持续任务用）
+// 模型曾自称通关但被判定为误判的轮数（防过度自信的 done）
+let doneClaims = 0;
 // 思考预算：推理模型的思考内容会挤占 max_tokens，一旦占满就 finish_reason=length 且 content 为空。
 // 视觉任务需分析整幅画面，思考量最大，给足额度；文本任务相对小。
 const VISION_MAX_TOKENS = 16384;
@@ -1304,6 +1373,13 @@ const TEXT_MAX_TOKENS = 8192;
 // 请求超时：看图 + 推理本身更慢，给视觉更长时间；超时会中止并提示"等待超时"
 const VISION_TIMEOUT_MS = 180000; // 3 分钟
 const TEXT_TIMEOUT_MS = 90000;    // 1.5 分钟
+// 画面相似度阈值：点击后低于此值视为"画面已变化（点击生效）"；高于 STUCK_SIM 视为"几乎没变化（卡住）"
+// 判定"画面是否因这次点击而变化"的阈值：越高越灵敏。
+// 点一个数字键只影响约 1.2% 画面，用 0.995 会漏判成"没点中"，导致同一坐标反复重试。
+const TAP_CHANGE_SIM = 0.9985;
+const STUCK_SIM = 0.995;
+// 模型自称 done 时，需要连续这么多轮都判断通关才真的停止（避免一次误判就结束）
+const DONE_CONFIRM_ROUNDS = 2;
 // 从模型返回的 message 里取"正式回答"文本
 // 推理模型会把思考塞进 content、或把答案放进 reasoning_content；规则：谁身上有 JSON 就用谁，都没 JSON 时优先 content
 function pickModelText(msg) {
@@ -1591,6 +1667,11 @@ async function aiAgentLoop(cfg) {
   aiAgent.playing = true;
   aiAgent.abort = false;
   aiAgent.note = '';
+  // 每次启动新一轮清空上一轮的排除记录（换局/换关后旧答案可能重新有效）
+  doneClaims = 0;
+  lastTapFeedback = '';
+  tapHistory = [];
+  levelCount = 0;
   let plan = '';
   // 启动前用文本模型做一次策略规划（失败不阻塞，继续用视觉流程）
   try {
@@ -1607,6 +1688,8 @@ async function aiAgentLoop(cfg) {
   const system =
     '你是H5小游戏自动操作员。你会收到当前游戏窗口的完整截图，坐标用 0~1 相对比例表示：x=0 是画面最左边、x=1 是最右边；y=0 是最上边、y=1 是最下边。' +
     '定位方法（重要，请严格照做以对准小目标）：先在心里把画面横向切成 10 等份、纵向切成 10 等份，估出目标中心点落在第几份，再写成 0.05 精度的小数（如第 3 份中间 ≈ 0.25）；' +
+    '计算格子类目标（键盘、选项、九宫格）时，用公式：x = (列号 - 0.5) / 总列数，y = (行号 - 0.5) / 总行数；' +
+    '例如 6 列键盘第 5 格 → x = (5-0.5)/6 ≈ 0.75，而不是 0.65。务必用"格子的中心"而不是格子左边缘来算，否则会系统性偏左并点到相邻格；' +
     '对于并排的按钮/按键（如数字键盘），务必确认目标是在第几个格子，左右相邻按钮中心通常只差 0.1 左右，看错一格就会点偏邻键；宁可多看一秒，不要点错目标。' +
     'reasoning 里先说明「目标在画面中的位置描述」，再给出 tap 坐标。' +
     (rules ? '\n[游戏规则]\n' + rules : '') +
@@ -1614,9 +1697,18 @@ async function aiAgentLoop(cfg) {
     '\n[当前任务]\n' + (goal || '自动游玩并尽量通关') +
     (oneShot ? '\n[任务类型：单次动作] 只需找到目标执行1次tap后必须done=true立即停止。绝不要重复点击同一目标——即使画面看似没变化，你的点击也已生效（画面稳定是正常的），不要因此重复点击；宁可输出wait也不要多点。' : '') +
     '\n每轮我会发一张当前游戏截图。你看画面判断并输出下一步，只输出一个JSON：' +
-    '{"reasoning":"你看到的画面一句话","actions":[{"type":"tap","x":0~1,"y":0~1}|{"type":"wait","ms":500}|{"type":"restart"}],"done":false}。' +
-    '约束：一次最多3个动作；tap坐标必须在0~1；wait用于等待动画/加载/画面变化；restart表示重新开始本局。' +
+    '{"reasoning":"你看到的画面一句话","actions":[{"type":"tap","box":[左,上,右,下],"label":"目标名称"}|{"type":"wait","ms":500}|{"type":"restart"}],"done":false}。' +
+    '\n【点哪里——用边界框 box（重要，这决定了点击精度）】' +
+    '不要直接给一个点，而是给出目标物体在画面中的矩形范围 box=[左,上,右,下]，四个数都是相对整张截图的 0~1 比例' +
+    '（x：0=最左、1=最右；y：0=最上、1=最下）。程序会自动取这个框的正中心去点。' +
+    '为什么用框：判断"这个按钮的左右边在哪、上下边在哪"比凭空估中心更准，取四边中点还能自动抵消单边误差。' +
+    '要求：框要贴合目标本身的边缘（例如一个按键就框住这个按键的整个方块，不要包含相邻按键，也不要只框住里面的字）。' +
+    '务必用 0~1 的小数表示（如 0.35），不要用像素数字（如 320）——四个数都必须 ≤ 1。' +
+    '例：要点下方 4 列字块中最左边那个，它的框约 box=[0.11,0.70,0.31,0.77]，中心就落在约 (0.21,0.735)。' +
+    '纯点击、没有具体目标形状时（比如点空白处），也可以用旧的 {"type":"tap","x":0~1,"y":0~1}。' +
+    '\n约束：一次最多3个动作；box 里四个数都必须在 0~1；wait用于等待动画/加载/画面变化；restart表示重新开始本局。' +
     '何时done=true停止：①任务是某个具体单次动作（如“点数字3”“按开始按钮”“点击那个图标”）——只找该目标并点击一次，完成后立即done=true，绝不点击目标以外的任何无关元素，宁可wait也不要乱点；②持续类任务（如“自动过关”“一直点某处”“循环游玩”）——仅在已通关或确定无法继续时done=true。' +
+    '\n【关于过关】当游戏真的进入下一关/显示成功时，输出 done=true；系统会自动进入下一关继续。' +
     '禁止输出JSON以外的任何文字。';
   let history = [];
   let stuck = 0;      // 画面连续无变化轮数
@@ -1630,36 +1722,40 @@ async function aiAgentLoop(cfg) {
       const page = await gameWin.webContents.capturePage();
       // 等比缩放（不能强制拉伸成固定宽高）：否则画面变形，模型按变形图估的坐标换算回原图会左右偏移
       const rawSz = page.getSize();
-      // 等比缩放：宽度上限 720（原来 414 太小，小键盘/数字按钮糊成一片，模型容易点偏相邻目标）
-      const TARGET_W = Math.min(720, rawSz.width || 720);
-      const scale = rawSz.width > 0 ? TARGET_W / rawSz.width : 1;
-      const small = page.resize({ width: TARGET_W, height: Math.max(1, Math.round(rawSz.height * scale)) });
+      // 截图清晰度（方案E）：默认宽度上限 720。若配置里开了"高清截图"，则用原始 Retina 分辨率
+      // （实测对本游戏精度提升很小、但 token 增加约 55%，故做成可选，默认关）
+      const hiRes = !!(auto.options && auto.options.aiHiRes);
+      const capW = hiRes ? Math.max(720, rawSz.width || 720) : Math.min(720, rawSz.width || 720);
+      const scale = rawSz.width > 0 ? capW / rawSz.width : 1;
+      const small = page.resize({ width: capW, height: Math.max(1, Math.round(rawSz.height * scale)) });
       const b64 = small.toJPEG(80).toString('base64');
+      // 记录本轮发给模型的图片尺寸：若模型误用像素坐标描述 box，可按此换算回 0~1
+      aiAgent.lastImgW = small.getSize().width;
+      aiAgent.lastImgH = small.getSize().height;
       // 卡住提示：连续多轮画面几乎没变 → 告诉模型换策略（单次任务不发，避免误导重复点击已生效的目标）
       // 签名复用本轮已截的图，避免再截一次（省时且保证和发给模型的是同一帧）
       let hint = '';
+      // 上一轮点击若判定为"可能没点中"，本轮先把这条反馈塞给模型，让它重新定位
+      if (lastTapFeedback) { hint = lastTapFeedback; lastTapFeedback = ''; }
       if (!oneShot) {
-        const tiny = page.resize({ width: 20, height: 36 });
-        const bmp = tiny.toBitmap();
-        const n = 20 * 36;
-        const sig = new Float32Array(n);
-        for (let i = 0; i < n; i++) {
-          const o = i * 4;
-          sig[i] = (0.299 * bmp[o] + 0.587 * bmp[o + 1] + 0.114 * bmp[o + 2]) / 255;
-        }
-        if (lastSig) {
+        const sig = signatureOf(page);
+        if (lastSig && sig) {
           const sim = similarity(lastSig, sig);
-          if (sim > 0.985) { stuck++; if (stuck >= 3) hint = '（提示：画面已连续' + stuck + '轮无明显变化，可能卡住了，请换策略、等待或 restart）'; }
+          // 本轮画面相比上一轮几乎没变 → 累计卡住轮数
+          if (sim > STUCK_SIM) { stuck++; if (stuck >= 3) hint += '（提示：画面已连续' + stuck + '轮无明显变化，可能卡住了，请换策略、等待或 restart）'; }
           else stuck = 0;
         }
         lastSig = sig;
       }
-      const res = await aiVisionAsk(b64, system, history, hint ? '请看当前游戏画面' + hint : undefined, visionPick);
+      let askText = '请看当前游戏画面';
+      if (hint) askText += hint;
+      const res = await aiVisionAsk(b64, system, history, askText, visionPick);
       if (aiAgent.abort) break; // 等待模型期间用户点了停止 → 立即退出，不再执行后续动作
       if (!res.ok) {
         if (aiAgent.abort || res.error === '已停止') break;
-        setStatus('视觉决策失败：' + res.error + '（本轮等待后重试）', { aiPlaying: true });
-        await sleep(3000);
+        // aiVisionAsk 内部已完成重试与退避等待；这里只做极短暂停顿就进入下一轮，避免双重等待白等几秒
+        setStatus('视觉决策失败：' + res.error + '（马上重试）', { aiPlaying: true });
+        await sleep(600);
         continue;
       }
       const act = extractJson(res.text);
@@ -1674,7 +1770,7 @@ async function aiAgentLoop(cfg) {
           break;
         }
         setStatus('模型未返回有效动作（' + (res.used || '视觉模型') + '，' + badRounds + '/' + MAX_BAD + '）：' + why, { aiPlaying: true });
-        await sleep(2500);
+        await sleep(1000); // 格式没解析对，稍等即可重发，无需长等
         continue;
       }
       badRounds = 0;
@@ -1682,22 +1778,88 @@ async function aiAgentLoop(cfg) {
       aiAgent.note = String(act.reasoning || act.note || '');
       setStatus('AI 看到：' + (aiAgent.note || '') + '（' + who + '）', { aiPlaying: true });
       let tapped = false;
+      // 记录本轮实际做过的点击（用于下一轮告诉模型"你刚才点了哪里、有没有生效"）
+      const doneTaps = [];
       for (const ac of act.actions.slice(0, 3)) {
         if (aiAgent.abort) break;
         if (ac.type === 'tap') {
-          const okTap = await doTap(ac.x, ac.y);
-          if (!okTap) { setStatus('模型给出非法坐标（x=' + ac.x + ', y=' + ac.y + '），已跳过本次点击', { aiPlaying: true }); }
-          await sleep(600);
+          // 每次点击前都【即时】截当前帧作基准（不用本轮开头可能已过期的 page），
+          // 并稍等一帧让上一动作的渲染稳定，避免把上一次动作的变化算到这一次头上
+          await sleep(120);
+          let before = page;
+          if (gameWin && !gameWin.isDestroyed()) {
+            try { before = await gameWin.webContents.capturePage(); } catch (e) { before = page; }
+          }
+          const pt = actionXY(ac);
+          const okTap = await doTap(pt.x, pt.y);
+          const posDesc = (pt.via === 'box' && Array.isArray(ac.box))
+            ? ('「' + (ac.label || '目标') + '」框中心(' + pt.x + ',' + pt.y + ')')
+            : ('(' + pt.x + ',' + pt.y + ')');
+          if (!okTap) { setStatus('模型给出非法坐标 ' + posDesc + '，已跳过本次点击', { aiPlaying: true }); }
+          else {
+            // 点击后校验：等画面响应后重新截图，与点击前比对判断这次点击是否真的生效
+            const changed = await waitScreenChange(before, 2600);
+            doneTaps.push({ x: pt.x, y: pt.y, changed });
+            if (!changed) setStatus('点击 ' + posDesc + ' 后画面无视觉变化（可能点空/等输入/无需变化）', { aiPlaying: true });
+          }
           if (okTap && oneShot) { tapped = true; break; } // 单次任务：点完即停，不再执行后续动作
         }
         else if (ac.type === 'wait') { await sleep(Math.max(200, Number(ac.ms) || 500)); }
         else if (ac.type === 'restart') { if (gameWin && !gameWin.isDestroyed()) gameWin.webContents.reload(); await sleep(1200); }
       }
       if (aiAgent.abort) break; // 动作执行期间被停止 → 结束主循环
-      history = [{ role: 'assistant', content: res.text }]; // 轻量上下文：让模型记得自己上一步说了什么
+      // 若本轮有点击但画面没变，把这条实测反馈交给下一轮提示词（比让模型自己猜准得多）
+      const misses = doneTaps.filter(t => !t.changed);
+      if (misses.length) {
+        lastTapFeedback = '（实测反馈：上次点击 ' + misses.map(t => '(' + t.x + ',' + t.y + ')').join('、') +
+          ' 之后画面没有视觉变化。这不一定是点错位置——也可能是点到空白处、或该操作本就不引起画面变化。' +
+          '请先判断：当前画面是否已包含你要的结果（如果已填入/已展开，就别重复点）；' +
+          '若目标确实还没响应，请重新仔细观察目标位置，给出更准的坐标。）';
+      }
+      // 上下文：保留上一轮模型判断 + 最近几轮点击记录，让模型知道自己点过哪里、有没有生效，
+      // 避免在同一位置反复点（原来只留一条 assistant，模型完全没有点击历史）
+      tapHistory.unshift(doneTaps);
+      tapHistory = tapHistory.slice(0, 3); // 最近 3 轮，控制 token
+      const flat = [];
+      tapHistory.forEach((round, ri) => round.forEach(t => flat.push({ ...t, ago: ri })));
+      history = [{ role: 'assistant', content: res.text }];
+      if (flat.length) {
+        const desc = flat.map(t => '(' + t.x + ',' + t.y + ')' + (t.changed ? '生效' : '无变化') + (t.ago ? '·' + t.ago + '轮前' : '')).join('；');
+        history.push({ role: 'user', content: '[近期操作记录] ' + desc + '。若某处已点过且画面无变化，不要在原地重复点击，请重新定位目标。' });
+      }
       // 单次任务代码层兜底：执行过一次 tap 即强制停止，不依赖模型 done 判定（模型常不遵守）
       if (oneShot && tapped) { setStatus('AI 完成单次点击：' + String(act.reasoning || goal) + '（已点一次，停止）', { aiPlaying: false }); aiAgent.playing = false; break; }
-      if (act.done) { setStatus('AI 判定结束：' + String(act.reasoning || '完成') + '（停止）', { aiPlaying: false }); aiAgent.playing = false; break; }
+      // 模型自称通关：不轻信。需连续两轮都判断通关才真正停止，避免"把错答案当成已通关"直接结束。
+      if (act.done) {
+        doneClaims++;
+        if (oneShot || doneClaims >= DONE_CONFIRM_ROUNDS) {
+          // 二次确认通关：重置计数，进入下一关
+          doneClaims = 0;
+          tapHistory = [];
+          lastSig = null;
+          stuck = 0;
+          badRounds = 0; // 无效动作计数也重置，避免跨关累积导致误停
+          if (oneShot) {
+            setStatus('AI 完成：' + String(act.reasoning || '完成') + '（单次任务结束）', { aiPlaying: false });
+            aiAgent.playing = false;
+            break;
+          }
+          // 持续任务：不停止，进入下一关继续（游戏通常会自动进下一关，等画面稳定后再决策）
+          levelCount++;
+          setStatus('✅ 第 ' + levelCount + ' 关通过，继续下一关…', { aiPlaying: true });
+          lastTapFeedback = '（刚刚已经通过上一关，现在进入新的一关，请按当前这一关的画面重新分析作答。）';
+          await sleep(1800); // 等过关动画/切关完成
+          continue;
+        }
+        // 第一次说 done：只复核，不停止
+        lastTapFeedback = '（重要：你上一轮说已通关。请再确认一次画面是否真的显示通关/成功' +
+          '（例如出现下一关、成功提示、进度推进、答案被判定为正确）。' +
+          '若只是答案格被填满但游戏并未过关，说明答案是错的，请删掉并换一个全新的答案。' +
+          '如果确实已通关，请再次输出 done=true。';
+        setStatus('模型判断已通关，正在复核（' + doneClaims + '/' + DONE_CONFIRM_ROUNDS + '）…', { aiPlaying: true });
+        continue;
+      }
+      doneClaims = 0; // 本轮没声称通关，清零
     }
   } catch (err) {
     setStatus('AI 智能决策异常：' + String((err && err.message) || err), { aiPlaying: false });

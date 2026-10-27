@@ -94,6 +94,7 @@
     <textarea class="txt aiCmdBox" id="aiCmd" rows="3" placeholder="例如：帮我一直点开始按钮 / 自动过关 / 点击键盘上面的数字3一次"></textarea>
     <div class="row" style="margin-bottom:6px;"><span style="flex:none;width:56px;color:#9aa0c8;font-size:12px;">文本模型</span><select id="aiTextModel" style="flex:1;width:auto;"></select></div>
     <div class="row" style="margin-bottom:8px;"><span style="flex:none;width:56px;color:#9aa0c8;font-size:12px;">视觉模型</span><select id="aiVisionModel" style="flex:1;width:auto;"></select></div>
+    <label class="check" style="margin-bottom:8px;"><input type="checkbox" id="aiHiRes"> 高清截图（Retina 原始分辨率，定位更清晰但更慢/更费 token）</label>
     <div class="aiRow"><button class="aiGo" id="aiGo">▶ AI 开始</button><button class="aiStopBtn" id="aiStopCtl" disabled>■ 停止</button></div>
     <div class="hint" id="aiNote">AI 每步截取游戏画面，让所选视觉模型决策（模型来自「🧩 模型配置」页，选「自动」则按配置顺序降级重试）。游戏规则在「游戏库 → 编辑游戏 → 游戏规则」里填写，填了 AI 更懂怎么玩。</div>
     <div class="t" style="margin-top:12px;">状态（记录变化过程，最新在最上）<button class="clearSt" id="clearStatus">清空</button></div>
@@ -297,11 +298,13 @@
       if (!opts) return;
       if (opts.aiTextModel) $('aiTextModel').value = opts.aiTextModel;
       if (opts.aiVisionModel) $('aiVisionModel').value = opts.aiVisionModel;
+      if (opts.aiHiRes !== undefined) $('aiHiRes').checked = !!opts.aiHiRes;
     });
   });
   // 切换模型即记住，下次打开沿用
   $('aiTextModel').onchange = e => window.panel.setOption({ aiTextModel: e.target.value });
   $('aiVisionModel').onchange = e => window.panel.setOption({ aiVisionModel: e.target.value });
+  $('aiHiRes').onchange = e => window.panel.setOption({ aiHiRes: e.target.checked });
 </script>
 </body>
 </html>

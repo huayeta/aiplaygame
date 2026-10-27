@@ -62,6 +62,16 @@
   .label { font-size: 12px; color: #9aa0c8; margin-bottom: 6px; display: block; }
   #viewAI select, #viewAI input[type=text], #viewAI input[type=password], #viewAI textarea { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #2a2d52; background: #0f1020; color: #e8e9f5; font-size: 13px; outline: none; }
   #viewAI textarea { resize: vertical; min-height: 110px; }
+  /* 播报话术分类卡片 */
+  .lg-card { border:1px solid #2a2d52; border-radius:12px; padding:12px 14px; margin-bottom:10px; background:#13142a; }
+  .lg-card.disabled { opacity:.55; }
+  .lg-head { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+  .lg-head .lg-check { width:16px; height:16px; accent-color:#22d39a; cursor:pointer; flex:none; }
+  .lg-head input.lg-name { flex:1; min-width:0; padding:6px 10px; border-radius:8px; border:1px solid #2a2d52; background:#0f1020; color:#e8e9f5; font-size:13px; font-weight:600; outline:none; }
+  .lg-head .lg-count { flex:none; font-size:11px; color:#22d39a; background:rgba(34,211,154,.12); padding:2px 8px; border-radius:10px; }
+  .lg-head .lg-del { flex:none; background:none; border:1px solid #4a2530; color:#f87171; border-radius:8px; padding:5px 10px; font-size:12px; cursor:pointer; }
+  .lg-head .lg-del:hover { background:#4a2530; }
+  .lg-card textarea { width:100%; box-sizing:border-box; resize:vertical; min-height:76px; padding:9px 11px; border-radius:8px; border:1px solid #2a2d52; background:#0f1020; color:#e8e9f5; font-size:12px; outline:none; }
   .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .range { flex: 1; min-width: 150px; }
   .range .rangeHead { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
@@ -295,11 +305,12 @@
 时间提醒：{period}{hm}，一起度过美好时光</textarea>
           </div>
           <div class="field">
-            <span class="label">播报内容列表（随机选一条，每行一条）</span>
-            <textarea id="lines" placeholder="欢迎家人们来到直播间，喜欢点点关注
-好玩的小游戏每天都有，点点赞增加热度
-无聊摸鱼的家人快来放松一下
-感谢每一位停留陪伴的家人"></textarea>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+              <span class="label" style="margin:0;">播报话术分类（勾选要启用的分类，启用的分类下所有话术都会进入播报池随机播放）</span>
+              <button class="ghost" id="addLineGroup" style="flex:none;padding:5px 12px;font-size:12px;">＋ 新增分类</button>
+            </div>
+            <div id="lineGroups"></div>
+            <div class="hint" id="lineGroupsHint" style="font-size:11px;color:#6b7a99;margin-top:4px;"></div>
           </div>
           <div class="btns">
             <button class="green" id="startTimer">▶ 开始播报</button>
@@ -715,10 +726,15 @@
   const voiceSel = document.getElementById('voiceSel');
   function rebuildVoiceSel(eng) {
     const list = eng === 'qwen3' ? QWEN_VOICES : (eng === 'baidu' ? BAIDU_VOICES : VOICES);
+    // 优先保留：待回填的已存值 > 当前选中值 > 列表第一个
+    const pending = voiceSel.dataset.pendingValue;
     const cur = voiceSel.value;
     voiceSel.innerHTML = '';
     list.forEach(v => { const o = document.createElement('option'); o.value = v[0]; o.textContent = v[1]; voiceSel.appendChild(o); });
-    voiceSel.value = (cur && list.some(v => v[0] === cur)) ? cur : list[0][0];
+    const want = (pending && list.some(v => v[0] === pending)) ? pending
+               : ((cur && list.some(v => v[0] === cur)) ? cur : list[0][0]);
+    voiceSel.value = want;
+    if (pending && list.some(v => v[0] === pending)) delete voiceSel.dataset.pendingValue;
   }
   rebuildVoiceSel('edge');
 
@@ -1145,10 +1161,14 @@
       const list = await window.api.listVoices() || [];
       window.__voiceList = list;
       const sel = document.getElementById('voiceLibSel');
+      const pending = sel.dataset.pendingValue;
       const cur = sel.value;
       sel.innerHTML = '<option value="">（选一个已克隆音色，自动设音色）</option>' +
         list.map(v => `<option value="${v.id}">${v.name}</option>`).join('');
-      if (cur && list.some(v => v.id === cur)) sel.value = cur;
+      // 优先恢复待回填的已存音色，其次保留当前选中
+      const want = (pending && list.some(v => v.id === pending)) ? pending : ((cur && list.some(v => v.id === cur)) ? cur : '');
+      if (want) sel.value = want;
+      if (pending && list.some(v => v.id === pending)) delete sel.dataset.pendingValue;
       // 若之前已选中音色，重新填下拉后仍保持选中，预热状态显示沿用
       if (sel.value) setState('ttsState', '已选用音色，可直接朗读');
     } catch (e) {}
@@ -1208,7 +1228,96 @@
   };
   document.getElementById('stopTts').onclick = () => { ttsStopped = true; stopLoop(); if (loopStopResolve) { loopStopResolve(); loopStopResolve = null; } stopAllVoice(); setTtsBtnRunning(false); setState('ttsState', '已停止'); };
 
-  function getLines() { return document.getElementById('lines').value.split('\n').map(s => s.trim()).filter(Boolean); }
+  // ===== 播报话术分类管理 =====
+  // 数据结构：[{id, name, enabled, lines:[...]}]  存在 client-config.json 的 tts.lineGroups
+  let lineGroups = [];
+  function lgGenId() { return 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2,5); }
+  // 从启用的分类里汇总所有话术（去重），作为播报池
+  function getLines() {
+    const out = [];
+    const seen = new Set();
+    for (const g of lineGroups) {
+      if (!g.enabled) continue;
+      for (const raw of (g.lines || [])) {
+        const t = String(raw || '').trim();
+        if (t && !seen.has(t)) { seen.add(t); out.push(t); }
+      }
+    }
+    return out;
+  }
+  const lgEsc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  // 渲染分类卡片
+  function renderLineGroups() {
+    const box = document.getElementById('lineGroups');
+    if (!box) return;
+    if (!lineGroups.length) {
+      box.innerHTML = '<div style="color:#6b7a99;font-size:12px;padding:10px 0;">还没有分类，点右上角「＋ 新增分类」开始添加</div>';
+    } else {
+      box.innerHTML = lineGroups.map((g, i) => {
+        const cnt = (g.lines || []).filter(x => String(x).trim()).length;
+        return '<div class="lg-card' + (g.enabled ? '' : ' disabled') + '" data-gid="' + lgEsc(g.id) + '">' +
+          '<div class="lg-head">' +
+            '<input type="checkbox" class="lg-check" data-act="toggle"' + (g.enabled ? ' checked' : '') + ' title="勾选后这一类的所有话术才会参与播报">' +
+            '<input class="lg-name" data-act="name" value="' + lgEsc(g.name || '') + '" placeholder="分类名称，如：拉互动 / 拉打标签 / 引导点击">' +
+            '<span class="lg-count">' + cnt + ' 条</span>' +
+            '<button class="lg-del" data-act="del" title="删除这个分类">删除</button>' +
+          '</div>' +
+          '<textarea data-act="lines" placeholder="每行一条话术&#10;例如：&#10;没点关注的点点关注&#10;点点赞增加热度">' + lgEsc((g.lines || []).join('\n')) + '</textarea>' +
+        '</div>';
+      }).join('');
+    }
+    // 底部提示：统计启用的分类与话术数
+    const hint = document.getElementById('lineGroupsHint');
+    if (hint) {
+      const en = lineGroups.filter(g => g.enabled).length;
+      const total = getLines().length;
+      hint.textContent = '已启用 ' + en + ' 个分类，共 ' + total + ' 条话术参与随机播报'
+        + (en === 0 ? '（当前没有启用的分类，播报会提示列表为空）' : '');
+    }
+    bindLineGroupEvents();
+  }
+  function bindLineGroupEvents() {
+    const box = document.getElementById('lineGroups');
+    if (!box) return;
+    box.querySelectorAll('.lg-card').forEach(card => {
+      const gid = card.dataset.gid;
+      const g = lineGroups.find(x => x.id === gid);
+      if (!g) return;
+      const chk = card.querySelector('[data-act=toggle]');
+      if (chk) chk.onchange = () => { g.enabled = chk.checked; card.classList.toggle('disabled', !g.enabled); renderLineGroups(); lgSave(); };
+      const nameEl = card.querySelector('[data-act=name]');
+      if (nameEl) nameEl.oninput = () => { g.name = nameEl.value; lgSave(); };
+      const linesEl = card.querySelector('[data-act=lines]');
+      if (linesEl) {
+        linesEl.oninput = () => {
+          g.lines = linesEl.value.split('\n');
+          // 只更新条数显示，避免整块重绘导致输入焦点丢失
+          const cnt = g.lines.filter(x => String(x).trim()).length;
+          const cEl = card.querySelector('.lg-count');
+          if (cEl) cEl.textContent = cnt + ' 条';
+          const hint = document.getElementById('lineGroupsHint');
+          if (hint) hint.textContent = '已启用 ' + lineGroups.filter(x => x.enabled).length + ' 个分类，共 ' + getLines().length + ' 条话术参与随机播报';
+          lgSave();
+        };
+      }
+      const del = card.querySelector('[data-act=del]');
+      if (del) del.onclick = () => {
+        if (!confirm('删除分类「' + (g.name || '未命名') + '」及其全部话术？')) return;
+        lineGroups = lineGroups.filter(x => x.id !== gid);
+        renderLineGroups(); lgSave();
+      };
+    });
+  }
+  // 保存分类（防抖），并入 tts 分组
+  let lgTimer = null;
+  function lgSave() {
+    // 话术或启用状态变了，旧的洗牌池作废，下次重新按最新启用分类构建
+    if (typeof pickPool !== 'undefined') pickPool = [];
+    clearTimeout(lgTimer);
+    lgTimer = setTimeout(() => {
+      try { window.api.cfgSave({ tts: { lineGroups } }); } catch (e) {}
+    }, 400);
+  }
   const RECENT = 5;      // 边界防撞：新一轮开头避开最近这 5 条
   let pickPool = [];     // 洗牌池：本轮打乱后按序取，一轮内不重复
   let recentLines = [];  // 最近播过的内容队列
@@ -1320,6 +1429,16 @@
     setState('timerState', '已停止');
   };
   document.getElementById('preview').onclick = () => { const line = pickLine(); if (line) speak(line); else setState('timerState', '播报列表为空', true); };
+  // 新增播报话术分类
+  document.getElementById('addLineGroup').onclick = () => {
+    lineGroups.push({ id: lgGenId(), name: '新分类', enabled: true, lines: [] });
+    renderLineGroups();
+    lgSave();
+    // 聚焦最后一个分类的名称输入框
+    const cards = document.querySelectorAll('#lineGroups .lg-card');
+    const last = cards[cards.length - 1];
+    if (last) { const n = last.querySelector('[data-act=name]'); if (n) { n.focus(); n.select(); } }
+  };
 
   // ---- 报时：每 X 分钟播当前时间，走同一队列，排队不打断定时播报 ----
   function timeText() {
@@ -1887,6 +2006,132 @@
   }
   document.getElementById('aiTest').addEventListener('click', aiPersist);
   aiLoad(); // JSON 配置恢复
+
+  // ============================================================
+  // AI 主播 / 弹幕回复 配置本地化存储（统一存到 config/client-config.json）
+  // 用声明式绑定表：每个字段说明 id、类型(text/num/bool/sel)，自动完成加载与保存。
+  // 保存采用防抖，避免拖动滑块/频繁输入时反复写盘。
+  // ============================================================
+  const CFG_BINDINGS = {
+    tts: {
+      engineSel: 'sel', voiceSel: 'sel', voiceLibSel: 'sel',
+      qwenKey: 'text', baiduAk: 'text', baiduSk: 'text',
+      speed: 'num', ttsVol: 'num', bgmVol: 'num',
+      ttsText: 'text',
+      randA: 'num', randB: 'num', clockM: 'num', clockTpls: 'text',
+      loopMode: 'sel', duck: 'sel',
+      minChunk: 'num', temperature: 'num', sampleSteps: 'num', topK: 'num',
+      startBuffer: 'num', lowWater: 'num', highWater: 'num'
+    },
+    danmaku: {
+      dmUrl: 'text', dmAutoRead: 'bool', dmAutoScroll: 'bool', dmCool: 'num', dmIFilter: 'bool',
+      dmEvtwelcome: 'bool', dmEvtgift: 'bool', dmEvtlike: 'bool',
+      dmTplWelcome: 'text', dmTplGift: 'text', dmTplLike: 'text'
+    },
+    extraAi: {
+      aiVisionOn: 'bool' // AI答疑里之前漏存的画面识别开关
+    }
+  };
+  // 所有需要保存的控件 id（拍平，供监听用）
+  const ALL_BIND_FIELDS = Object.assign({}, CFG_BINDINGS.tts, CFG_BINDINGS.danmaku, CFG_BINDINGS.extraAi);
+
+  function cfgReadControl(id, type) {
+    const el = document.getElementById(id);
+    if (!el) return undefined;
+    if (type === 'bool') return !!el.checked;
+    if (type === 'num') return el.value === '' ? '' : Number(el.value);
+    return el.value;
+  }
+  function cfgWriteControl(id, type, val) {
+    const el = document.getElementById(id);
+    if (!el || val === undefined || val === null) return;
+    if (type === 'bool') { el.checked = !!val; return; }
+    // select 的值若当前不存在对应 option（如音色列表异步加载中），等下次再设
+    if (el.tagName === 'SELECT' && el.options.length && !Array.from(el.options).some(o => o.value === String(val))) {
+      el.dataset.pendingValue = val; return;
+    }
+    el.value = val;
+    // 同步 range 的显示数值
+    if (type === 'num' && el.dispatchEvent) {
+      try { el.dispatchEvent(new Event('input', { bubbles: false })); } catch (e) {}
+    }
+  }
+
+  // 保存：防抖 400ms，把所有绑定字段收集成 {tts:{...}, danmaku:{...}, aiChat:{...}}
+  let cfgSaveTimer = null;
+  function cfgSaveAllDebounced() {
+    clearTimeout(cfgSaveTimer);
+    cfgSaveTimer = setTimeout(() => {
+      const patch = {};
+      for (const group of Object.keys(CFG_BINDINGS)) {
+        const obj = {};
+        for (const [id, type] of Object.entries(CFG_BINDINGS[group])) {
+          const v = cfgReadControl(id, type);
+          if (v !== undefined) obj[id] = v;
+        }
+        if (group === 'extraAi') patch.aiChat = obj;   // AI答疑开关归入 aiChat
+        else patch[group] = obj;
+      }
+      try { window.api.cfgSave(patch); } catch (e) {}
+    }, 400);
+  }
+
+  // 监听：text 用 input 事件防抖保存；bool/sel/num 用 change；range 用 input
+  Object.entries(ALL_BIND_FIELDS).forEach(([id, type]) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const evt = (type === 'bool' || type === 'sel') ? 'change' : 'input';
+    el.addEventListener(evt, cfgSaveAllDebounced);
+    if (type === 'num' && el.tagName === 'INPUT') el.addEventListener('change', cfgSaveAllDebounced);
+  });
+
+  // 加载：读回 client-config.json 里对应分组，回填每个控件
+  async function cfgLoadAll() {
+    try {
+      const cfg = await window.api.cfgLoad() || {};
+      for (const group of Object.keys(CFG_BINDINGS)) {
+        const src = group === 'extraAi' ? (cfg.aiChat || {}) : (cfg[group] || {});
+        for (const [id, type] of Object.entries(CFG_BINDINGS[group])) {
+          if (src[id] !== undefined) cfgWriteControl(id, type, src[id]);
+        }
+      }
+      // 播报话术分类：优先用已存的分组；没有则用旧的单一 lines 文本迁移成分组，再不行给几个默认分类
+      const ttsCfg = cfg.tts || {};
+      if (Array.isArray(ttsCfg.lineGroups) && ttsCfg.lineGroups.length) {
+        lineGroups = ttsCfg.lineGroups.map(g => ({
+          id: g.id || lgGenId(), name: g.name || '未命名',
+          enabled: g.enabled !== false,
+          lines: Array.isArray(g.lines) ? g.lines : []
+        }));
+      } else if (typeof ttsCfg.lines === 'string' && ttsCfg.lines.trim()) {
+        // 旧版只有一个大文本框 → 迁移为一个分类
+        lineGroups = [{ id: lgGenId(), name: '默认话术', enabled: true, lines: ttsCfg.lines.split('\n') }];
+      } else {
+        lineGroups = defaultLineGroups();
+      }
+      renderLineGroups();
+    } catch (e) { lineGroups = defaultLineGroups(); renderLineGroups(); }
+  }
+  // 首次使用的默认分类示例
+  function defaultLineGroups() {
+    return [
+      { id: lgGenId(), name: '拉互动', enabled: true, lines: [
+        '没点关注的点点关注，每天都来练脑子、玩游戏！',
+        '感谢每一位停留陪伴的家人，点点赞增加热度',
+        '无聊摸鱼的家人快来放松一下～'
+      ] },
+      { id: lgGenId(), name: '引导点击', enabled: true, lines: [
+        '想玩同款的，点下方小摇杆，直接进游戏！',
+        '简单好上手，老人小孩都能玩，点一下就能玩！'
+      ] },
+      { id: lgGenId(), name: '拉打标签', enabled: false, lines: [
+        '喜欢这类脑力游戏的家人扣个 1，我看看有多少',
+        '这类益智小游戏你们爱玩吗？爱玩的公屏打字告诉我'
+      ] }
+    ];
+  }
+  // 延迟一点加载，确保动态填充的 select（音色列表等）先就绪再回填
+  setTimeout(cfgLoadAll, 600);
 
   // ---------- 模型配置页（独立管理所有提供商） ----------
   let mdProviders = [];
