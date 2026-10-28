@@ -667,6 +667,64 @@ async function startGame(game) {
   const fresh = !!auto.options.freshStart;
   if (fresh) await clearGameStorage(game.url, gameWin);
   gameWin.loadURL(game.url);
+  // ===== 游戏窗口自适应 =====
+  // 思路：让【窗口】去适应【游戏真实尺寸】（窗口本来就浮动）；只有游戏比屏幕可用区还大时才等比缩小，
+  // 并用浏览器自身的溢出信号(scrollWidth>clientWidth)迭代收敛缩放，直到彻底没有滚动条。
+  let fitApplied = false;
+  const measureOverflow = () => gameWin.webContents.executeJavaScript(`(function(){
+    var d = document.documentElement, b = document.body;
+    return {
+      w: Math.max(d.scrollWidth, b?b.scrollWidth:0, d.clientWidth),
+      h: Math.max(d.scrollHeight, b?b.scrollHeight:0, d.clientHeight),
+      overH: d.scrollWidth > d.clientWidth + 1,
+      overV: d.scrollHeight > d.clientHeight + 1
+    };
+  })()`);
+  async function fitGameWindow() {
+    if (!gameWin || gameWin.isDestroyed()) return;
+    try {
+      // 固定窗口 414x736（保持小巧舒服的原始尺寸，不放大）
+      gameWin.setContentSize(GAME_W, GAME_H);
+      gameWin.webContents.setZoomFactor(1);
+      await new Promise(r => setTimeout(r, 150));
+      const m = await measureOverflow();
+      if (!m || m.w < 50 || m.h < 50) return; // 还在 loading，等下一轮
+
+      let z = 1;
+      // 关键：只有固定窗口下出现滚动条（内容溢出）时，才缩小内容去适配 414x736；
+      // 没有滚动条就保持 1:1 原样，不做任何缩放。
+      if (m.overH || m.overV) {
+        for (let i = 0; i < 14; i++) {
+          z *= 0.95;
+          gameWin.webContents.setZoomFactor(z);
+          await new Promise(r => setTimeout(r, 130));
+          const o = await measureOverflow();
+          if (!o) break;
+          if (!o.overH && !o.overV) break; // 无溢出了
+          if (z < 0.3) break;
+        }
+      }
+      fitApplied = true;
+      // 点击换算基准 = CSS 视口宽高 = 窗口尺寸 / 缩放比
+      aiAgent.pageW = GAME_W / z;
+      aiAgent.pageH = GAME_H / z;
+      console.log('[fit-game] 固定窗口 ' + GAME_W + 'x' + GAME_H + '：' +
+        (z < 0.999 ? ('内容 ' + m.w + 'x' + m.h + ' 有滚动条，缩放 ' + z.toFixed(3) + ' 适配') : '无滚动条，1:1 原样显示') +
+        '，点击基准 ' + aiAgent.pageW.toFixed(0) + 'x' + aiAgent.pageH.toFixed(0));
+    } catch (e) { console.log('[fit-game-err] ' + e); }
+  }
+  const kickFit = () => {
+    let n = 0;
+    const tick = async () => {
+      if (!gameWin || gameWin.isDestroyed() || n++ > 20) return;
+      if (!fitApplied) await fitGameWindow();
+      if (!fitApplied) setTimeout(tick, 800);
+    };
+    setTimeout(tick, 600);
+  };
+  gameWin.webContents.on('did-finish-load', () => { fitApplied = false; kickFit(); });
+  gameWin.webContents.on('did-navigate', () => { fitApplied = false; kickFit(); });
+  kickFit();
   gameWin.on('closed', () => {
     gameWin = null;
     stopPlayback();
@@ -797,6 +855,8 @@ async function doTap(x, y) {
     const s = gameWin.getContentSize();
     if (s && s.width > 0 && s.height > 0) { cw = s.width; ch = s.height; }
   }
+  // 若已知页面真实可见内容区（不含滚动条），用它做换算基准，避免滚动条导致的偏移
+  if (aiAgent.pageW > 0 && aiAgent.pageH > 0) { cw = aiAgent.pageW; ch = aiAgent.pageH; }
   if (px <= 1) px *= cw;
   if (py <= 1) py *= ch;
   px = Math.max(0, Math.min(cw, Math.round(px)));
@@ -1319,9 +1379,11 @@ ipcMain.on('game:pointer', (e, p) => {
   if (auto.recording && auto.script) {
     const now = Date.now();
     const level = auto.script.levels[auto.script.levels.length - 1];
-    // 存 0~1 相对比例坐标（相对录制时窗口实际尺寸），换机器/改窗口大小后按比例还原
-    let cw = GAME_W, ch = GAME_H;
-    if (gameWin && !gameWin.isDestroyed()) {
+    // 存 0~1 相对比例坐标。p.x 是 clientX（CSS 像素），必须用 CSS 视口尺寸(aiAgent.pageW)换算——
+    // 窗口缩放后 CSS 视口 != getContentSize(物理)，用物理尺寸会把比例算错(>1)。
+    let cw = (aiAgent.pageW > 0 ? aiAgent.pageW : GAME_W);
+    let ch = (aiAgent.pageH > 0 ? aiAgent.pageH : GAME_H);
+    if (!(aiAgent.pageW > 0) && gameWin && !gameWin.isDestroyed()) {
       const s = gameWin.getContentSize();
       if (s && s.width > 0 && s.height > 0) { cw = s.width; ch = s.height; }
     }
@@ -1360,7 +1422,7 @@ ipcMain.on('tpl:capture', async () => {
 
 // ---------- AI 智能决策：逐步截图 → 视觉模型决策 → 执行（智谱主 / 商汤降级 + 重试） ----------
 // 与脚本回放（自动玩）互不影响：独立 playing 状态、独立启停；复用 doTap 的 0~1 相对坐标换算
-const aiAgent = { playing: false, abort: false, note: '', lastImgW: 0, lastImgH: 0 };
+const aiAgent = { playing: false, abort: false, note: '', lastImgW: 0, lastImgH: 0, pageW: 0, pageH: 0 };
 let lastTapFeedback = ''; // 上一轮点击"可能没点中"的反馈，下一轮提示词带上
 let tapHistory = [];      // 最近几轮的点击记录（供上下文参考）
 let levelCount = 0;         // 连续过关计数（持续任务用）
@@ -1732,6 +1794,12 @@ async function aiAgentLoop(cfg) {
       // 记录本轮发给模型的图片尺寸：若模型误用像素坐标描述 box，可按此换算回 0~1
       aiAgent.lastImgW = small.getSize().width;
       aiAgent.lastImgH = small.getSize().height;
+      // 记录页面可见内容区尺寸（clientWidth/Height 不含滚动条）：
+      // 若网页有滚动条，getContentSize 会比可见区大，用它换算会点偏；这里以真实可见区为准。
+      try {
+        const vp = await gameWin.webContents.executeJavaScript('({w: document.documentElement.clientWidth, h: document.documentElement.clientHeight})');
+        if (vp && vp.w > 0 && vp.h > 0) { aiAgent.pageW = vp.w; aiAgent.pageH = vp.h; }
+      } catch (e) {}
       // 卡住提示：连续多轮画面几乎没变 → 告诉模型换策略（单次任务不发，避免误导重复点击已生效的目标）
       // 签名复用本轮已截的图，避免再截一次（省时且保证和发给模型的是同一帧）
       let hint = '';
@@ -1885,8 +1953,8 @@ ipcMain.handle('aiAgent:models', () => {
     return { items, default: 'auto' };
   };
   const out = {
-    vision: build(buildVisionPool(), '自动（按模型配置页顺序降级）'),
-    text: build(buildTextPool(), '自动（按模型配置页顺序降级）')
+    vision: build(buildVisionPool(), '自动（按顺序降级）'),
+    text: build(buildTextPool(), '自动（按顺序降级）')
   };
   console.log('[ai-models] 视觉可选: ' + out.vision.items.map(i => i.label).join(' | '));
   console.log('[ai-models] 文本可选: ' + out.text.items.map(i => i.label).join(' | '));

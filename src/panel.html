@@ -5,7 +5,7 @@
 <title>自动玩控制台</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
-  body { background: #15162a; color: #e8e9f5; padding: 18px; }
+  body { background: #15162a; color: #e8e9f5; padding: 18px; overflow-x: hidden; }
   h2 { font-size: 17px; margin-bottom: 4px; }
   .sub { font-size: 12px; color: #8a90b8; margin-bottom: 16px; }
   .sec { background: #1d1f38; border-radius: 14px; padding: 14px; margin-bottom: 14px; }
@@ -31,7 +31,7 @@
   .aiGo.running { background: linear-gradient(135deg,#f59e0b,#d97706); animation: aiPulse 1.1s ease-in-out infinite; }
   .aiStopBtn:disabled { opacity: .4; cursor: not-allowed; background: #3a3d63; }
   @keyframes aiPulse { 0%,100% { filter: brightness(1); } 50% { filter: brightness(1.28); } }
-  .row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; font-size: 13px; }
+  .row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; font-size: 13px; min-width: 0; }
   .row .num { width: 54px; text-align: center; background: #0f1020; color: #fff; border: 1px solid #2a2d48; border-radius: 6px; padding: 5px; margin: 0 6px; font-size: 13px; }
   select, input[type=range] { width: 130px; }
   select { padding: 6px; border-radius: 8px; background: #0f1020; color: #e8e9f5; border: 1px solid #2a2d52; }
@@ -92,8 +92,8 @@
   <div class="sec">
     <div class="t">AI 智能决策（说一句，AI 看画面自己玩）</div>
     <textarea class="txt aiCmdBox" id="aiCmd" rows="3" placeholder="例如：帮我一直点开始按钮 / 自动过关 / 点击键盘上面的数字3一次"></textarea>
-    <div class="row" style="margin-bottom:6px;"><span style="flex:none;width:56px;color:#9aa0c8;font-size:12px;">文本模型</span><select id="aiTextModel" style="flex:1;width:auto;"></select></div>
-    <div class="row" style="margin-bottom:8px;"><span style="flex:none;width:56px;color:#9aa0c8;font-size:12px;">视觉模型</span><select id="aiVisionModel" style="flex:1;width:auto;"></select></div>
+    <div class="row" style="margin-bottom:6px;"><span style="flex:none;width:56px;color:#9aa0c8;font-size:12px;">文本模型</span><select id="aiTextModel" style="flex:1;width:0;min-width:0;box-sizing:border-box;"></select></div>
+    <div class="row" style="margin-bottom:8px;"><span style="flex:none;width:56px;color:#9aa0c8;font-size:12px;">视觉模型</span><select id="aiVisionModel" style="flex:1;width:0;min-width:0;box-sizing:border-box;"></select></div>
     <label class="check" style="margin-bottom:8px;"><input type="checkbox" id="aiHiRes"> 高清截图（Retina 原始分辨率，定位更清晰但更慢/更费 token）</label>
     <div class="aiRow"><button class="aiGo" id="aiGo">▶ AI 开始</button><button class="aiStopBtn" id="aiStopCtl" disabled>■ 停止</button></div>
     <div class="hint" id="aiNote">AI 每步截取游戏画面，让所选视觉模型决策（模型来自「🧩 模型配置」页，选「自动」则按配置顺序降级重试）。游戏规则在「游戏库 → 编辑游戏 → 游戏规则」里填写，填了 AI 更懂怎么玩。</div>
