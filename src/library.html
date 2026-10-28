@@ -62,6 +62,12 @@
   .label { font-size: 12px; color: #9aa0c8; margin-bottom: 6px; display: block; }
   #viewAI select, #viewAI input[type=text], #viewAI input[type=password], #viewAI textarea { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #2a2d52; background: #0f1020; color: #e8e9f5; font-size: 13px; outline: none; }
   #viewAI textarea { resize: vertical; min-height: 110px; }
+  /* 循环朗读间隔行：居中排布（间隔 随机  [a] ~ [b] 秒） */
+  .loop-gap-row { display:flex; align-items:center; justify-content:flex-start; gap:10px; margin:12px 0 6px; }
+  .loop-gap-label { font-size:13px; color:#9aa0c8; }
+  .loop-gap-sep { font-size:13px; color:#9aa0c8; }
+  .loop-gap-input { width:84px; padding:9px 10px; border-radius:10px; border:1px solid #2a2d52; background:#0f1020; color:#e8e9f5; font-size:14px; text-align:center; outline:none; }
+  .loop-gap-input:focus { border-color:#8b5cff; box-shadow:0 0 0 3px rgba(139,92,255,.2); }
   /* 播报话术分类卡片 */
   .lg-card { border:1px solid #2a2d52; border-radius:12px; padding:12px 14px; margin-bottom:10px; background:#13142a; }
   .lg-card.disabled { opacity:.55; }
@@ -275,6 +281,13 @@
             <button class="primary" id="ttsBtn">▶ 朗读</button>
             <button class="ghost" id="stopTts">■ 停止</button>
             <label class="switch" style="margin-left:8px;"><input type="checkbox" id="loopRead"> 循环朗读</label>
+          </div>
+          <div class="loop-gap-row">
+            <span class="loop-gap-label">间隔 随机</span>
+            <input type="number" id="loopGapA" value="5" min="0" class="loop-gap-input">
+            <span class="loop-gap-sep">~</span>
+            <input type="number" id="loopGapB" value="15" min="0" class="loop-gap-input">
+            <span class="loop-gap-label">秒</span>
           </div>
           <div class="state" id="ttsState"></div>
           <hr>
@@ -931,7 +944,15 @@
     });
   }
 
-  function stopLoop() { loopAudio.pause(); loopAudio.currentTime = 0; loopAudio.loop = false; }
+  function stopLoop() {
+    loopRunning = false;
+    loopGen++; // 作废旧循环，避免其收尾时改按钮状态
+    if (loopGapTimer) { clearTimeout(loopGapTimer); loopGapTimer = null; }
+    if (typeof cancelTasks === 'function') cancelTasks('loopread'); // 移除还在排队未播的循环任务
+    const f = loopStopResolve; loopStopResolve = null;
+    if (f) { try { f(); } catch (e) {} }
+    try { loopAudio.pause(); loopAudio.currentTime = 0; loopAudio.loop = false; } catch (e) {}
+  }
   // 等待当前本地流式播放空闲（报时用）：若正在播报/朗读则等它播完，带超时兜底避免卡死
   function sWaitIdle(timeout) {
     const limit = timeout || 25000; // 最多等 25s，超时强制放行（防止某条流式卡住导致报时永远等不到）
@@ -979,6 +1000,7 @@
       id: String(++taskIdSeq), type: t.type || 'READ',
       text: t.text, tag,
       tpl: t.tpl || null, tplV: t.tplV || null, // 延迟渲染：播报瞬间才按模板句+变量生成文本
+      url: t.url || null, // 预合成音频地址（循环朗读每遍直接用，不再重复合成）
       callback: t.callback || (() => {}),
       timestamp: Date.now(),
       engine: t.engine || 'auto'
@@ -991,17 +1013,23 @@
     const task = taskQueue.shift();
     currentTask = task;
     try {
-      // 过期丢弃：超过 30s 的旧任务直接丢（主要针对事件/报时）
-      if (Date.now() - task.timestamp > 30000) { isPlaying = false; currentTask = null; return triggerScheduler(); }
-      // 延迟求值：播报瞬间才生成文本。模板任务按"模板句+最新变量"渲染；报时/定时内容用函数；其余用已渲染文本
-      const finalText = task.tpl ? cleanForTTS(dmTpl(task.tpl, task.tplV)) : (typeof task.text === 'function' ? task.text() : task.text);
-      if (finalText) {
-        const res = await playTTS(finalText, task.engine);
-        if (!res || !res.ok) {
-          const msg = (res && res.err) || '未知错误';
-          setState('ttsState', '朗读失败：' + msg, true);
-          aiLog('朗读失败：' + msg);
-          if (task.tag === 'read' && !ttsStopped) alert('朗读失败：' + msg); // 手动朗读醒目提示，定时/事件静默进日志
+      // 过期丢弃：超过 30s 的旧任务直接丢（主要针对事件/报时）。循环朗读(LOOPREAD)不丢，否则会断链。
+      if (task.type !== 'LOOPREAD' && Date.now() - task.timestamp > 30000) { isPlaying = false; currentTask = null; return triggerScheduler(); }
+      if (task.url) {
+        // 预合成音频（循环朗读每遍）：直接播放缓存 url，无需再合成
+        const res = await playVoiceAndDone(task.url);
+        if (!res || !res.ok) { setState('ttsState', '朗读失败：' + ((res && res.err) || '未知错误'), true); }
+      } else {
+        // 延迟求值：播报瞬间才生成文本。模板任务按"模板句+最新变量"渲染；报时/定时内容用函数；其余用已渲染文本
+        const finalText = task.tpl ? cleanForTTS(dmTpl(task.tpl, task.tplV)) : (typeof task.text === 'function' ? task.text() : task.text);
+        if (finalText) {
+          const res = await playTTS(finalText, task.engine);
+          if (!res || !res.ok) {
+            const msg = (res && res.err) || '未知错误';
+            setState('ttsState', '朗读失败：' + msg, true);
+            aiLog('朗读失败：' + msg);
+            if (task.tag === 'read' && !ttsStopped) alert('朗读失败：' + msg); // 手动朗读醒目提示，定时/事件静默进日志
+          }
         }
       }
       // 播完回调（通常用于重新启动倒计时）
@@ -1202,22 +1230,48 @@
     b.disabled = on;
     b.textContent = on ? '正在朗读…' : '▶ 朗读';
   }
-  let loopStopResolve = null; // 循环朗读的停止信号
+  let loopStopResolve = null; // 循环朗读的停止信号（resolve 挂起的 speakLoop）
+  let loopGapTimer = null;    // 循环朗读"读完→随机间隔"的倒计时定时器
+  let loopRunning = false;    // 循环是否进行中
+  let loopGen = 0;            // 循环代次：防止旧的 speakLoop 收尾时误改新循环的按钮状态
+  // 循环朗读：每"读一遍"作为一个队列任务（type=LOOPREAD，播放预合成好的 url）入队，
+  // 走统一调度串行播放——不会和弹幕朗读/定时播报/报时抢音；一遍播完→随机间隔倒计时（队列空闲可播别的）→再入队下一遍。
   async function speakLoop(text) {
     stopLoop();
-    if (!text) { setState('ttsState', '请先输入文案', true); setTtsBtnRunning(false); return; }
-    if (engineValue() === 'sovits' && !refAudioValue()) { setState('ttsState', '请先选择参考音频（音色）', true); setTtsBtnRunning(false); return; }
+    const myGen = ++loopGen;
+    if (!text) { setState('ttsState', '请先输入文案', true); if (myGen === loopGen) setTtsBtnRunning(false); return; }
+    if (engineValue() === 'sovits' && !refAudioValue()) { setState('ttsState', '请先选择参考音频（音色）', true); if (myGen === loopGen) setTtsBtnRunning(false); return; }
     clearVoice();
     setState('ttsState', '合成中…');
     const r = await window.api.tts({ text, engine: engineValue(), voice: voiceSel.value, refAudio: refAudioValue(), speed: +document.getElementById('speed').value, ...inferParamsObj() });
-    if (!r.ok) { setState('ttsState', '合成失败：' + r.err, true); alert('合成失败：' + r.err); setTtsBtnRunning(false); return; }
-    loopAudio.volume = +document.getElementById('ttsVol').value;
-    loopAudio.src = r.url;
-    loopAudio.loop = true;
-    loopAudio.play();
+    if (myGen !== loopGen) return; // 合成期间被停止/替换
+    if (!r.ok) { setState('ttsState', '合成失败：' + r.err, true); alert('合成失败：' + r.err); if (myGen === loopGen) setTtsBtnRunning(false); return; }
+    const url = r.url; // 合成一次，循环播放这个缓存文件，避免每遍重复合成
+    loopRunning = true;
+    const gapSec = () => {
+      const a = Math.max(0, parseFloat(document.getElementById('loopGapA').value) || 0);
+      const b = Math.max(a, parseFloat(document.getElementById('loopGapB').value) || a);
+      return Math.round((a + Math.random() * (b - a)) * 10) / 10;
+    };
+    // 入队"播放一遍"：作为 LOOPREAD 任务走统一队列；播完回调里做随机间隔，再排下一遍
+    const enqueueRound = () => {
+      if (!loopRunning) return;
+      addTask({
+        type: 'LOOPREAD', tag: 'loopread', url: url,
+        callback: () => {
+          if (!loopRunning) return;
+          const g = gapSec();
+          setState('ttsState', '朗读完成，约 ' + g + ' 秒后再次朗读…');
+          if (loopGapTimer) clearTimeout(loopGapTimer);
+          loopGapTimer = setTimeout(() => { loopGapTimer = null; if (loopRunning) enqueueRound(); }, g * 1000);
+        }
+      });
+    };
     setState('ttsState', '循环朗读中…');
+    enqueueRound();
+    // 挂起直到用户停止（stopLoop 会 resolve 它）
     await new Promise(res => { loopStopResolve = res; });
-    setTtsBtnRunning(false);
+    if (myGen === loopGen) setTtsBtnRunning(false);
   }
   document.getElementById('ttsBtn').onclick = async () => {
     const text = document.getElementById('ttsText').value;
@@ -1624,17 +1678,19 @@
   function dmPick(src, key){
     const a = (src || '').split('\n').map(x => x.trim()).filter(Boolean);
     if (!a.length) return '';
-    const st = dmPickState[key] || (dmPickState[key] = { pool: [], recent: [] });
-    // 模板内容变化（增删改）或池取空 → 重建洗牌池
-    if (st.pool.length !== a.length || !st.pool.every((v,i)=>v===a[i])) {
+    const sig = a.join('\n'); // 源内容签名：只有模板内容变化或池取空时才重建，保证"一轮内不重复"
+    const st = dmPickState[key] || (dmPickState[key] = { pool: [], recent: [], sig: null });
+    if (st.sig !== sig || !st.pool.length) {
+      st.sig = sig;
       st.pool = a.slice();
       for (let i = st.pool.length - 1; i > 0; i--) { // Fisher-Yates 洗牌
         const j = Math.floor(Math.random() * (i + 1));
         [st.pool[i], st.pool[j]] = [st.pool[j], st.pool[i]];
       }
-      // 边界防撞：把第一条换成不在最近5条里的内容，避免衔接重复
-      if (st.recent.length && st.pool.length > 1) {
-        const idx = st.pool.findIndex(v => !st.recent.includes(v));
+      // 边界防撞：只避开"上一次挑中的那条"，保证跨轮衔接不重复（2条模板也能严格交替）
+      const lastPick = st.recent[st.recent.length - 1];
+      if (lastPick != null && st.pool.length > 1 && st.pool[0] === lastPick) {
+        const idx = st.pool.findIndex(v => v !== lastPick);
         if (idx > 0) [st.pool[0], st.pool[idx]] = [st.pool[idx], st.pool[0]];
       }
     }
@@ -1768,7 +1824,9 @@
     if (!document.getElementById('aiOn').checked) return; // 未启用
     const question = (ev && ev.d && ev.d.text) || (ev && ev.raw) || ''; // 提问用聊天内容（已去掉用户名）
     if (!question) return;
-    if (dmClassify(question)) return; // 欢迎/礼物/点赞事件不触发AI
+    // 只有聊天消息才触发 AI 答疑；欢迎/礼物/点赞等事件消息不触发。
+    // （用 ev.type 判定，避免对纯聊天再做一次文本分类导致"主播 我来了"被误判成 welcome 而漏答）
+    if (ev && ev.type && ev.type !== 'chat') return;
     if (dmContentBlocked(question)) return; // 内容安全过滤：命中敏感/违规/广告等不触发AI答疑
     const now = Date.now();
     const cool = Math.max(0, +document.getElementById('aiCool').value || 0) * 1000;
@@ -1804,6 +1862,16 @@
     s = s.replace(/\s+/g, ' ').trim();
     return s;
   }
+  // 内容过滤词表（模块级常量，避免每条弹幕都重建数组造成 GC 压力）。
+  // 已收窄：去掉单字/过于日常易误杀的词（如 烟/酒/孩子/学生/年龄/投资/医院…），保留明确高风险词。
+  const DM_KW_EXT = ['快手','b站','bilibili','哔哩哔哩','淘宝','天猫','拼多多','闲鱼','京东','苏宁','唯品会','微博','微店','抖音号','公众号','视频号','小红书','知乎','虎牙','斗鱼','yy','映客','花椒','易信','钉钉','line','telegram','ins','youtube','油管','discord'];
+  const DM_KW_AD = ['加微信','加v','扫码','二维码','群号','进群','拼单','刷单','代购','优惠券','返现','红包群','加我','私信我','关注我公众号','下载app','点击链接','免费领取','领红包','充值','变现','兼职','招代理','招生','卖号','租号','出号','收号','联系方式','联系我','私聊','线下交易','货到付款','先款','先货','定金','尾款','拍下','下单链接','秒杀','砍价','拼团'];
+  const DM_KW_MED = ['药品','处方','治疗','治愈','根治','药到病除','保健品','滋补','壮阳','补肾','减肥','瘦身','祛痘','祛斑','美白','医美','整容','隆胸','植发','丰胸','增高','近视矫正','抗癌','降血压','降血糖','三高','特效药','祖传秘方','偏方'];
+  const DM_KW_FIN = ['荐股','股票','炒股','牛股','涨停','操盘','内幕','贷款','借贷','网贷','放款','利率','稳赚','保本','高收益','众筹','比特币','虚拟币','币圈','炒币','挖矿','基金推荐'];
+  const DM_KW_MINOR = ['未成年','未成年人','小学生','初中生','高中生'];
+  const DM_KW_BET = ['赌博','博彩','彩票','赌球','赌马','六合彩','百家乐','老虎机','押注','下注','倍投','庄家','盘口','开奖'];
+  const DM_KW_GOODS = ['香烟','电子烟','茅台','枪支','刀具','管制刀具','弹药','爆炸物','毒品','冰毒','摇头丸','大麻','迷药','假币','代开发票','走私','赃物','账号交易','游戏币','代练'];
+  const DM_KW_BAD = ['傻逼','煞笔','脑残','废物','垃圾玩意','去死','操你','妈的','草你','刷屏举报','举报你','色情','约炮','上床','卖淫','嫖娼','白痴','蠢货','狗东西','废物点心','神经病','恶心'];
   // 内容安全过滤：命中敏感/违规/广告/联系方式等内容返回 true（朗读与 AI 答疑共用）。
   // 内置基础规则 + 用户 aiFilter 自定义黑名单关键词，命中即拦截。
   function dmContentBlocked(text){
@@ -1817,29 +1885,21 @@
     if (/[\w.+-]+@[\w-]+\.\w+/.test(s)) return true;              // 邮箱
     if (/0(10|2[0-9]|3[0-9]|4[0-9]|5[0-9]|6[0-9]|7[0-9]|8[0-9]|9[0-9])\d{7,8}/.test(s)) return true; // 固定电话
     // 2) 站外导流/竞品平台（抖音重点管控，导流站外最重）
-    const extKw = ['快手','b站','bilibili','bilibili','哔哩哔哩','淘宝','天猫','拼多多','闲鱼','京东','苏宁','唯品会','微博','微店','抖音号','公众号','视频号','小红书','知乎','虎牙','斗鱼','yy','映客','花椒','易信','钉钉','line','telegram','ins','youtube','油管','discord'];
-    if (extKw.some(k => s.toLowerCase().includes(k))) return true;
+    if (DM_KW_EXT.some(k => s.toLowerCase().includes(k))) return true;
     // 3) 广告/引流/交易词
-    const adKw = ['加微信','加v','扫码','二维码','群号','进群','拼单','刷单','代购','优惠券','返现','红包群','加我','私信我','关注我公众号','下载app','点击链接','免费领取','领红包','充值','变现','兼职','招代理','招生','卖号','租号','出号','收号','联系方式','联系我','私聊','线下交易','货到付款','先款','先货','定金','尾款','拍下','下单链接','秒杀','砍价','拼团'];
-    if (adKw.some(k => s.includes(k))) return true;
-    // 4) 医疗健康违规：药品/保健品功效、医美、诊疗
-    const medKw = ['药品','处方','治疗','治愈','根治','药到病除','保健品','滋补','壮阳','补肾','减肥','瘦身','祛痘','祛斑','美白','医美','整容','隆胸','植发','丰胸','增高','近视矫正','抗癌','降血压','降血糖','三高','特效药','祖传秘方','偏方','就诊','医院','门诊'];
-    if (medKw.some(k => s.includes(k))) return true;
-    // 5) 金融违规：荐股、贷款、理财、稳赚
-    const finKw = ['荐股','股票','炒股','牛股','涨停','操盘','内幕','贷款','借贷','网贷','网贷','放款','利率','理财','投资','稳赚','保本','高收益','分红','众筹','比特币','虚拟币','币圈','炒币','挖矿','基金推荐','开户','佣金'];
-    if (finKw.some(k => s.includes(k))) return true;
-    // 6) 未成年人相关（平台重点管控）
-    const minorKw = ['未成年','未成年人','小孩','孩子','学生','青少年','小学生','初中生','高中生','几岁','多大','真实年龄','年龄'];
-    if (minorKw.some(k => s.includes(k))) return true;
+    if (DM_KW_AD.some(k => s.includes(k))) return true;
+    // 4) 医疗健康违规：药品/保健品功效、医美（已去掉"医院/门诊/就诊"等日常词）
+    if (DM_KW_MED.some(k => s.includes(k))) return true;
+    // 5) 金融违规：荐股、贷款、稳赚（已去掉"投资/开户/佣金/分红"等日常词）
+    if (DM_KW_FIN.some(k => s.includes(k))) return true;
+    // 6) 未成年人相关（平台重点管控；只保留明确表述，去掉"孩子/学生/年龄"等日常词）
+    if (DM_KW_MINOR.some(k => s.includes(k))) return true;
     // 7) 赌博博彩
-    const betKw = ['赌博','博彩','彩票','赌球','赌马','六合彩','百家乐','老虎机','押注','下注','倍投','庄家','盘口','开奖'];
-    if (betKw.some(k => s.includes(k))) return true;
-    // 8) 违规物品交易
-    const goodsKw = ['烟','香烟','电子烟','酒','茅台','枪支','刀具','管制','弹药','爆炸物','毒品','冰毒','摇头丸','大麻','迷药','假币','发票','代开发票','走私','赃物','账号交易','游戏币','代练'];
-    if (goodsKw.some(k => s.includes(k))) return true;
-    // 9) 敏感/引战/辱骂（基础词库，命中即不朗读、不答疑）
-    const badKw = ['傻逼','煞笔','脑残','废物','垃圾玩意','去死','操你','妈的','草你','嫖','赌','毒','刷屏举报','举报你','裸','色情','约炮','上床','卖淫','嫖娼','滚','白痴','蠢货','贱','狗东西','废物点心','神经病','恶心'];
-    if (badKw.some(k => s.includes(k))) return true;
+    if (DM_KW_BET.some(k => s.includes(k))) return true;
+    // 8) 违规物品交易（已去掉单字"烟/酒"避免烟花/酒吧误杀）
+    if (DM_KW_GOODS.some(k => s.includes(k))) return true;
+    // 9) 敏感/引战/辱骂（已去掉单字"滚/贱/裸/毒/赌"避免误杀）
+    if (DM_KW_BAD.some(k => s.includes(k))) return true;
     // 10) 用户自定义黑名单关键词（aiFilter）
     const custom = (document.getElementById('aiFilter').value || '').split(/[;；]/).map(x => x.trim()).filter(Boolean);
     if (custom.length && custom.some(k => s.includes(k))) return true;
@@ -2017,7 +2077,7 @@
       engineSel: 'sel', voiceSel: 'sel', voiceLibSel: 'sel',
       qwenKey: 'text', baiduAk: 'text', baiduSk: 'text',
       speed: 'num', ttsVol: 'num', bgmVol: 'num',
-      ttsText: 'text',
+      ttsText: 'text', loopGapA: 'num', loopGapB: 'num',
       randA: 'num', randB: 'num', clockM: 'num', clockTpls: 'text',
       loopMode: 'sel', duck: 'sel',
       minChunk: 'num', temperature: 'num', sampleSteps: 'num', topK: 'num',
@@ -2095,6 +2155,9 @@
           if (src[id] !== undefined) cfgWriteControl(id, type, src[id]);
         }
       }
+      // 同步运行时镜像变量：checkbox 只回填了勾选状态，但依赖它的脚本变量需在此显式同步，
+      // 否则如 dmAutoRead 勾选显示为开、实际自动朗读不生效（要手动点两下才生效）。
+      try { dmAutoReadOn = !!document.getElementById('dmAutoRead').checked; } catch (e) {}
       // 播报话术分类：优先用已存的分组；没有则用旧的单一 lines 文本迁移成分组，再不行给几个默认分类
       const ttsCfg = cfg.tts || {};
       if (Array.isArray(ttsCfg.lineGroups) && ttsCfg.lineGroups.length) {

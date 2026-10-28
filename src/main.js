@@ -331,6 +331,32 @@ function createAI() {
 // ---------- AI 助播：文本朗读 / 定时播报 / 背景音乐 ----------
 const VOICE_TMP = path.join(os.tmpdir(), 'aiassist_voice');
 try { fs.mkdirSync(VOICE_TMP, { recursive: true }); } catch (e) {}
+// 清理合成产生的临时音频（每次合成会新建一个时间戳子目录，不清理会一直堆积）。
+// 规则：按修改时间从新到旧，保留最近 keepRecent 个；超出部分且大于 olderThanMs 的才删除。
+function cleanVoiceTmp(opt) {
+  const keepRecent = (opt && opt.keepRecent != null) ? opt.keepRecent : 500;
+  const olderThanMs = (opt && opt.olderThanMs != null) ? opt.olderThanMs : 2 * 60 * 60 * 1000;
+  try {
+    const names = fs.readdirSync(VOICE_TMP);
+    const items = [];
+    for (const n of names) {
+      const p2 = path.join(VOICE_TMP, n);
+      let mt = 0; try { mt = fs.statSync(p2).mtimeMs; } catch (e) { mt = 0; }
+      items.push({ p: p2, mt });
+    }
+    items.sort((a, b) => b.mt - a.mt); // 新→旧
+    const now = Date.now();
+    let removed = 0;
+    for (let i = 0; i < items.length; i++) {
+      if (i < keepRecent) continue;                 // 最近 N 个一律保留（含正在循环播放的）
+      if (now - items[i].mt < olderThanMs) continue; // 还没到清理时限的保留
+      try { fs.rmSync(items[i].p, { recursive: true, force: true }); removed++; } catch (e) {}
+    }
+    if (removed) console.log('[voice-tmp] 已清理临时音频 ' + removed + ' 个');
+  } catch (e) {}
+}
+// 启动清理：此时没有任何播放，安全地把历史堆积清掉，只保留最近 50 个
+try { cleanVoiceTmp({ keepRecent: 50, olderThanMs: 0 }); } catch (e) {}
 
 // 百度 TTS OAuth token 缓存（有效期 30 天，内存复用）
 let baiduToken = null;
@@ -347,6 +373,7 @@ ipcMain.handle('ai:tts', async (e, opts) => {
   const dir = path.join(VOICE_TMP, String(Date.now()));
   try {
     fs.mkdirSync(dir, { recursive: true });
+    try { cleanVoiceTmp(); } catch (e) {} // 运行中轻量清理（默认只删>2h且超过500个的旧文件，不误删在用的）
 
     if (engine === 'sovits') {
       // 本地 GPT-SoVITS 引擎：调用 127.0.0.1:9880
