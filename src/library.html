@@ -1135,10 +1135,15 @@
   // 云端播放并等待真正播完
   async function playVoiceAndDone(url) {
     return new Promise(async res => {
+      // 统一出口：ended/出错/被暂停(停止按钮、clearVoice) 都要 resolve，
+      // 否则调度器 await 永远挂起，isPlaying 卡 true，整个语音队列死锁
+      const finish = (v) => { try { voiceAudio.removeEventListener('pause', onPaused); } catch (e) {} res(v); };
+      const onPaused = () => finish({ ok: false, err: '已停止' });
       voiceAudio.volume = +document.getElementById('ttsVol').value;
       if (bgmAudio.src) bgmAudio.volume = +document.getElementById('bgmVol').value;
-      voiceAudio.onended = () => { res({ ok: true }); };
-      voiceAudio.onerror = () => { res({ ok: false, err: '播放失败' }); };
+      voiceAudio.onended = () => finish({ ok: true });
+      voiceAudio.onerror = () => finish({ ok: false, err: '播放失败' });
+      voiceAudio.addEventListener('pause', onPaused);
       // 应用声音设备页选择的输出设备（若选了虚拟声卡）
       try { if (curSinkId && voiceAudio.setSinkId) await voiceAudio.setSinkId(curSinkId); } catch (e) {}
       voiceAudio.src = url;
@@ -2344,7 +2349,7 @@
       qwenKey: 'text', baiduAk: 'text', baiduSk: 'text',
       speed: 'num', ttsVol: 'num', bgmVol: 'num',
       ttsText: 'text', loopGapA: 'num', loopGapB: 'num',
-      randA: 'num', randB: 'num', clockM: 'num', clockTpls: 'text',
+      randA: 'num', randB: 'num', clockOn: 'bool', clockM: 'num', clockTpls: 'text',
       loopMode: 'sel', duck: 'sel',
       minChunk: 'num', temperature: 'num', sampleSteps: 'num', topK: 'num',
       startBuffer: 'num', lowWater: 'num', highWater: 'num'
