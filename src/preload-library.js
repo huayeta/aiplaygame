@@ -57,6 +57,20 @@ contextBridge.exposeInMainWorld('api', {
   modelDelete: (id) => ipcRenderer.invoke('models:delete', id),
   modelFetchList: (p) => ipcRenderer.invoke('models:fetchList', p),
   openConfigFile: () => ipcRenderer.invoke('models:openConfig'),
+  // 配置模板
+  tplList: () => ipcRenderer.invoke('tpl:list'),
+  tplAdd: (p) => ipcRenderer.invoke('tpl:add', p),
+  tplUpdate: (p) => ipcRenderer.invoke('tpl:update', p),
+  tplOverwrite: (id) => ipcRenderer.invoke('tpl:overwrite', id),
+  tplDelete: (id) => ipcRenderer.invoke('tpl:delete', id),
+  tplLoad: (id) => ipcRenderer.invoke('tpl:load', id),
+  tplBindGame: (p) => ipcRenderer.invoke('tpl:bindGame', p),
+  tplOpenDir: () => ipcRenderer.invoke('tpl:openDir'),
+  onTemplateLoaded: (cb) => {
+    const l = (_e, d) => cb(d);
+    ipcRenderer.on('cfg:templateLoaded', l);
+    return () => ipcRenderer.removeListener('cfg:templateLoaded', l);
+  },
   onDanmaku: (cb) => {
     const l = (_e, line) => cb(line);
     ipcRenderer.on('dm:message', l);

@@ -1368,7 +1368,14 @@ ipcMain.handle('games:delete', (e, id) => {
 });
 ipcMain.handle('game:start', (e, id) => {
   const g = readGames().find(x => x.id === id);
-  if (g) startGame(g);
+  if (g) {
+    // 若该游戏绑定了模板且勾了「自动加载」，打开游戏前先切换配置
+    if (g.templateId && g.autoTemplate) {
+      const r = tplLoadInto(g.templateId);
+      if (!r.ok) console.log('[tpl] 游戏「' + g.name + '」自动加载模板失败：' + r.error);
+    }
+    startGame(g);
+  }
   return !!g;
 });
 
@@ -1380,10 +1387,14 @@ ipcMain.handle('game:mute', (e, muted) => {
   return !!gameWin.webContents.isAudioMuted();
 });
 
-// ---------- 客户端统一配置文件（config/client-config.json） ----------
-// 所有模块配置集中存到一个 JSON 文件：启动读取、变更即写、任何模块直接查 JSON
+// ---------- 客户端配置文件 ----------
+// client-config.json：所有非模型配置（aiChat 通用项 / tts / danmaku 等）
+// models.json：模型提供商配置（API 地址 / Key / 文本模型 / 视觉模型），从 client-config 拆出，独立管理
+// 内存中仍统一用 clientConfig.aiChat.customProviders 作为唯一数据源，所有读取处无需改动；
+// 只在落盘时分流：模型列表 → models.json，其余 → client-config.json。
 const CONFIG_DIR = path.join(__dirname, '..', 'config');
 const CONFIG_PATH = path.join(CONFIG_DIR, 'client-config.json');
+const MODELS_PATH = path.join(CONFIG_DIR, 'models.json');
 const DEFAULT_CONFIG = {
   version: 1,
   aiChat: {
@@ -1392,7 +1403,8 @@ const DEFAULT_CONFIG = {
     aiPrompt: '我是一个小游戏主播，我现在玩的游戏是我要动个脑，如果有用户问玩的什么游戏，请替我回答，只回答用户的提问，其他弹幕不用回答，如果用户问什么游戏，用不同的风格去回复用户，字数在15个字左右',
     aiFilter: '', aiCool: '', aiRetry: '', aiFallback: true, aiFallOrder: '',
     aiOn: false, aiVoice: false, aiText: false,
-    customProviders: [] // 所有提供商统一为自定义：{id,label,base,key,textModel,visionModel}
+    aiModelId: '', aiVisionOn: false,
+    customProviders: [] // 落盘时不写这里，见 saveClientConfig / writeClientConfigFile
   }
 };
 let clientConfig = null;
@@ -1433,8 +1445,34 @@ function migrateBuiltinToCustom(aiChat) {
   delete aiChat.provider;
   return aiChat;
 }
+// 读模型列表：优先 models.json；不存在则从旧 client-config.json 的 aiChat.customProviders 迁移
+function loadModelsFile() {
+  try {
+    if (fs.existsSync(MODELS_PATH)) {
+      const raw = JSON.parse(fs.readFileSync(MODELS_PATH, 'utf8'));
+      const list = Array.isArray(raw) ? raw : (Array.isArray(raw.providers) ? raw.providers : null);
+      if (list) return list;
+    }
+  } catch (e) {}
+  return null;
+}
+function saveModelsFile(list) {
+  try {
+    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+    fs.writeFileSync(MODELS_PATH, JSON.stringify({ version: 1, providers: list }, null, 2), 'utf8');
+  } catch (e) {}
+}
+// 写 client-config.json：剔除 model 列表（它归 models.json 管）
+function writeClientConfigFile() {
+  try {
+    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+    const toSave = JSON.parse(JSON.stringify(clientConfig || {}));
+    if (toSave.aiChat) delete toSave.aiChat.customProviders;
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(toSave, null, 2), 'utf8');
+  } catch (e) {}
+}
 function loadClientConfig(){
-  let fromFile = false;
+  let legacyProviders = null; // 旧版嵌在 client-config 里的模型列表，用于一次性迁移
   try {
     if (fs.existsSync(CONFIG_PATH)) {
       const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
@@ -1443,20 +1481,28 @@ function loadClientConfig(){
         version: 1,
         aiChat: Object.assign({}, DEFAULT_CONFIG.aiChat, (raw.aiChat || {}))
       });
-      fromFile = true;
+      legacyProviders = clientConfig.aiChat.customProviders;
     } else {
       clientConfig = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
     }
   } catch (e) {
     clientConfig = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
   }
-  // 迁移 + 默认预置
+  // 旧内置字段 → customProviders（兼容很老的版本）
   clientConfig.aiChat = migrateBuiltinToCustom(clientConfig.aiChat);
-  if (!Array.isArray(clientConfig.aiChat.customProviders) || clientConfig.aiChat.customProviders.length === 0) {
-    clientConfig.aiChat.customProviders = JSON.parse(JSON.stringify(DEFAULT_CUSTOM_PROVIDERS));
+  // 模型列表：models.json 优先 → 旧 client-config 里迁移 → 默认预置
+  let models = loadModelsFile();
+  if (!models || !models.length) {
+    models = (Array.isArray(legacyProviders) && legacyProviders.length)
+      ? legacyProviders
+      : (Array.isArray(clientConfig.aiChat.customProviders) && clientConfig.aiChat.customProviders.length
+          ? clientConfig.aiChat.customProviders
+          : JSON.parse(JSON.stringify(DEFAULT_CUSTOM_PROVIDERS)));
   }
-  if (fromFile) { try { fs.writeFileSync(CONFIG_PATH, JSON.stringify(clientConfig, null, 2), 'utf8'); } catch (e) {} }
-  else { try { fs.mkdirSync(CONFIG_DIR, { recursive: true }); fs.writeFileSync(CONFIG_PATH, JSON.stringify(clientConfig, null, 2), 'utf8'); } catch (e) {} }
+  clientConfig.aiChat.customProviders = models;
+  // 分流落盘：模型 → models.json，其余 → client-config.json（顺便把旧文件里的模型字段清掉）
+  saveModelsFile(models);
+  writeClientConfigFile();
   return clientConfig;
 }
 function saveClientConfig(patch){
@@ -1468,15 +1514,164 @@ function saveClientConfig(patch){
       else clientConfig[k] = patch[k];
     }
   }
-  try {
-    fs.mkdirSync(CONFIG_DIR, { recursive: true });
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify(clientConfig, null, 2), 'utf8');
-  } catch (e) {}
+  // 若本次改动了模型列表，单独写 models.json；client-config.json 永不写模型字段
+  if (patch && patch.aiChat && Array.isArray(patch.aiChat.customProviders)) {
+    saveModelsFile(clientConfig.aiChat.customProviders);
+  }
+  writeClientConfigFile();
   return clientConfig;
 }
 loadClientConfig(); // 客户端启动即加载
 ipcMain.handle('cfg:load', () => loadClientConfig());
 ipcMain.handle('cfg:save', (e, patch) => saveClientConfig(patch));
+
+// ---------- 配置模板（config/templates/*.json） ----------
+// 每个模板是一份配置快照：{ aiChat, tts, danmaku }（模型 Key 在全局 models.json，不进模板）。
+// client-config.json 始终是「当前生效配置」；加载模板=把快照写回当前配置并通知界面刷新。
+// 游戏可绑定模板：games.json 里加 templateId + autoTemplate；启动游戏时可选自动加载。
+const CFG_TPL_DIR = path.join(CONFIG_DIR, 'templates');
+try { fs.mkdirSync(CFG_TPL_DIR, { recursive: true }); } catch (e) {}
+function tplFile(id) { return path.join(CFG_TPL_DIR, path.basename(String(id || '')) + '.json'); }
+function tplList() {
+  const files = [];
+  try { files.push(...fs.readdirSync(CFG_TPL_DIR).filter(f => /\.json$/i.test(f))); } catch (e) {}
+  const games = readGames();
+  return files.map(f => {
+    try {
+      const t = JSON.parse(fs.readFileSync(path.join(CFG_TPL_DIR, f), 'utf8'));
+      return {
+        id: t.id || path.basename(f, '.json'),
+        name: t.name || t.id || path.basename(f, '.json'),
+        note: t.note || '',
+        builtin: !!t.builtin,
+        createdAt: t.createdAt || 0,
+        updatedAt: t.updatedAt || 0,
+        sections: Object.keys(t.config || {}),
+        boundGames: games.filter(g => g.templateId === (t.id || path.basename(f, '.json')))
+                         .map(g => ({ id: g.id, name: g.name, auto: !!g.autoTemplate }))
+      };
+    } catch (e) { return null; }
+  }).filter(Boolean).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+}
+function tplRead(id) {
+  try { return JSON.parse(fs.readFileSync(tplFile(id), 'utf8')); } catch (e) { return null; }
+}
+function tplWrite(t) {
+  t.updatedAt = Date.now();
+  fs.mkdirSync(CFG_TPL_DIR, { recursive: true });
+  fs.writeFileSync(tplFile(t.id), JSON.stringify(t, null, 2), 'utf8');
+  return t;
+}
+// 当前配置快照（不含 customProviders，模型 Key 归 models.json 全局管）
+function tplSnapshot() {
+  const c = clientConfig || {};
+  const ai = Object.assign({}, c.aiChat || {});
+  delete ai.customProviders;
+  return { aiChat: ai, tts: Object.assign({}, c.tts || {}), danmaku: Object.assign({}, c.danmaku || {}) };
+}
+// 把模板快照写回当前配置（内存 + 磁盘），保留全局模型列表不被覆盖
+function tplApply(snap) {
+  if (!snap || typeof snap !== 'object') return false;
+  for (const k of ['aiChat', 'tts', 'danmaku']) {
+    if (snap[k] && typeof snap[k] === 'object') {
+      clientConfig[k] = Object.assign({}, clientConfig[k] || {}, snap[k]);
+    }
+  }
+  // 模型列表始终取全局 models.json，不受模板影响
+  const models = loadModelsFile();
+  if (models && models.length) clientConfig.aiChat.customProviders = models;
+  writeClientConfigFile();
+  return true;
+}
+function tplNotifyLoaded(id) {
+  if (libraryWin && !libraryWin.isDestroyed()) libraryWin.webContents.send('cfg:templateLoaded', { id: id || '' });
+}
+// 把某个模板设为当前配置（供 IPC 与游戏启动自动加载共用）
+function tplLoadInto(id) {
+  const t = tplRead(id);
+  if (!t) return { ok: false, error: '模板不存在' };
+  if (!tplApply(t.config || {})) return { ok: false, error: '模板内容无效' };
+  clientConfig.activeTemplateId = t.id; // 记录当前模板，界面可高亮
+  writeClientConfigFile();
+  tplNotifyLoaded(t.id);
+  console.log('[tpl] 已加载模板「' + t.name + '」(' + t.id + ')');
+  return { ok: true, id: t.id, name: t.name };
+}
+
+ipcMain.handle('tpl:list', () => ({ activeId: (clientConfig && clientConfig.activeTemplateId) || '', templates: tplList() }));
+// from: 'current'（当前配置）| 'blank'（空白） | 模板 id（复制某模板）
+ipcMain.handle('tpl:add', (e, p) => {
+  p = p || {};
+  const name = String(p.name || '').trim() || '未命名模板';
+  const id = 'tpl_' + Date.now();
+  let config;
+  if (p.from && p.from !== 'current' && p.from !== 'blank') {
+    const src = tplRead(p.from);
+    if (!src) return { ok: false, error: '要复制的模板不存在' };
+    config = JSON.parse(JSON.stringify(src.config || {}));
+  } else if (p.from === 'blank') {
+    config = { aiChat: {}, tts: {}, danmaku: {} };
+  } else {
+    config = tplSnapshot();
+  }
+  const t = { id, name, note: String(p.note || ''), builtin: false, createdAt: Date.now(), updatedAt: 0, config };
+  tplWrite(t);
+  return { ok: true, id, name };
+});
+ipcMain.handle('tpl:update', (e, p) => {
+  if (!p || !p.id) return { ok: false, error: '缺少模板 ID' };
+  const t = tplRead(p.id);
+  if (!t) return { ok: false, error: '模板不存在' };
+  if (p.name !== undefined) t.name = String(p.name || '').trim() || t.name;
+  if (p.note !== undefined) t.note = String(p.note || '');
+  tplWrite(t);
+  return { ok: true };
+});
+ipcMain.handle('tpl:overwrite', (e, id) => {
+  const t = tplRead(id);
+  if (!t) return { ok: false, error: '模板不存在' };
+  t.config = tplSnapshot();
+  tplWrite(t);
+  return { ok: true };
+});
+ipcMain.handle('tpl:delete', (e, id) => {
+  const t = tplRead(id);
+  if (!t) return { ok: true }; // 已不存在，幂等
+  if (t.builtin) return { ok: false, error: '内置模板不可删除' };
+  try { fs.unlinkSync(tplFile(id)); } catch (err) {}
+  // 解绑所有引用该模板的游戏
+  const list = readGames();
+  let changed = false;
+  for (const g of list) if (g.templateId === id) { delete g.templateId; delete g.autoTemplate; changed = true; }
+  if (changed) writeGames(list);
+  if (clientConfig && clientConfig.activeTemplateId === id) {
+    clientConfig.activeTemplateId = '';
+    writeClientConfigFile();
+  }
+  return { ok: true };
+});
+ipcMain.handle('tpl:load', (e, id) => tplLoadInto(id));
+// 游戏绑定模板：templateId 为空表示解绑；auto 表示启动游戏时自动加载
+ipcMain.handle('tpl:bindGame', (e, p) => {
+  if (!p || !p.gameId) return { ok: false, error: '缺少游戏 ID' };
+  const list = readGames();
+  const g = list.find(x => x.id === p.gameId);
+  if (!g) return { ok: false, error: '游戏不存在' };
+  const id = String(p.templateId || '');
+  if (id) {
+    if (!tplRead(id)) return { ok: false, error: '模板不存在' };
+    g.templateId = id;
+    g.autoTemplate = !!p.auto;
+  } else {
+    delete g.templateId;
+    delete g.autoTemplate;
+  }
+  writeGames(list);
+  return { ok: true, games: list };
+});
+// 打开模板目录（方便手动备份/管理）
+ipcMain.handle('tpl:openDir', async () => { try { await shell.openPath(CFG_TPL_DIR); return { ok: true }; } catch (e) { return { ok: false, error: String((e && e.message) || e) }; } });
+
 ipcMain.on('game:pointer', (e, p) => {
   if (auto.recording && auto.script) {
     const now = Date.now();
@@ -1544,6 +1739,70 @@ const TAP_CHANGE_SIM = 0.9985;
 const STUCK_SIM = 0.995;
 // 模型自称 done 时，需要连续这么多轮都判断通关才真的停止（避免一次误判就结束）
 const DONE_CONFIRM_ROUNDS = 2;
+
+// ---------- AI 决策 trace 落盘（config/ai-trace/<会话>/） ----------
+// 每轮：策略文本、发给模型的截图、hint、模型原始返回、解析出的动作、每个点击的坐标与"是否生效"、最终状态。
+// 目的：AI 点偏/乱点/误判通关时，打开这一轮的截图和坐标就能一眼复盘，不用翻控制台日志。
+const TRACE_DIR = path.join(CONFIG_DIR, 'ai-trace');
+let traceSession = null;   // { dir, startedAt, gameId, goal, rounds:[], seq }
+function traceEnabled() {
+  try { const a = clientConfig && clientConfig.aiChat; return !a || a.aiTrace !== false; } catch (e) { return true; }
+}
+function traceStart(gameId, goal, cfg) {
+  traceSession = null;
+  if (!traceEnabled()) return;
+  try {
+    const id = 'T' + Date.now();
+    const dir = path.join(TRACE_DIR, id);
+    fs.mkdirSync(dir, { recursive: true });
+    traceSession = { dir, id, startedAt: Date.now(), gameId: gameId || '', goal: goal || '', rounds: [], seq: 0, end: '' };
+    // 会话元信息：指令 + 模型选择 + 游戏规则摘要
+    const meta = {
+      id, startedAt: new Date(traceSession.startedAt).toISOString(),
+      gameId: traceSession.gameId, goal: traceSession.goal,
+      visionModel: (cfg && cfg.visionModel) || '', textModel: (cfg && cfg.textModel) || '',
+      oneShot: !!(cfg && cfg.oneShot)
+    };
+    fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify(meta, null, 2), 'utf8');
+    console.log('[ai-trace] 会话 ' + dir);
+  } catch (e) { traceSession = null; }
+}
+function traceWrite() {
+  if (!traceSession) return;
+  try {
+    const file = path.join(traceSession.dir, 'trace.json');
+    fs.writeFileSync(file, JSON.stringify({
+      id: traceSession.id, startedAt: traceSession.startedAt, endAt: Date.now(),
+      gameId: traceSession.gameId, goal: traceSession.goal,
+      rounds: traceSession.rounds, end: traceSession.end || ''
+    }, null, 2), 'utf8');
+  } catch (e) {}
+}
+function traceRound(rec) {
+  if (!traceSession) return;
+  try {
+    traceSession.seq++;
+    const n = traceSession.seq;
+    const r = Object.assign({ n, t: Date.now() }, rec);
+    // 截图存文件，trace.json 里只留文件名，避免 JSON 巨大
+    if (rec && rec.jpg) {
+      const shotFile = path.join(traceSession.dir, ('shot-' + String(n).padStart(3, '0') + '.jpg'));
+      fs.writeFileSync(shotFile, rec.jpg);
+      r.jpgFile = path.basename(shotFile);
+      delete r.jpg;
+    }
+    traceSession.rounds.push(r);
+    // 只保留最近 200 轮，防止长时间挂机把内存/文件撑爆
+    if (traceSession.rounds.length > 200) traceSession.rounds.shift();
+    traceWrite();
+  } catch (e) {}
+}
+function traceEnd(status) {
+  if (!traceSession) return;
+  traceSession.end = status || '';
+  traceWrite();
+  console.log('[ai-trace] 会话结束：' + status + '（' + traceSession.rounds.length + ' 轮，' + traceSession.dir + '）');
+}
 // 从模型返回的 message 里取"正式回答"文本
 // 推理模型会把思考塞进 content、或把答案放进 reasoning_content；规则：谁身上有 JSON 就用谁，都没 JSON 时优先 content
 function pickModelText(msg) {
@@ -1831,6 +2090,7 @@ async function aiAgentLoop(cfg) {
   aiAgent.playing = true;
   aiAgent.abort = false;
   aiAgent.note = '';
+  traceStart(auto.gameId, goal, cfg); // 开启本轮 trace 会话（一次 aiAgent:start = 一个会话目录）
   // 每次启动新一轮清空上一轮的排除记录（换局/换关后旧答案可能重新有效）
   doneClaims = 0;
   lastTapFeedback = '';
@@ -1883,6 +2143,8 @@ async function aiAgentLoop(cfg) {
   try {
     while (aiAgent.playing && !aiAgent.abort) {
       if (!gameWin || gameWin.isDestroyed()) { setStatus('游戏窗口已关闭，AI 停止', { aiPlaying: false }); aiAgent.playing = false; break; }
+      // 本轮 trace 记录（截图/画面判断/模型返回/动作/点击结果），轮末统一落盘
+      const roundRec = { jpg: null, imgW: 0, imgH: 0, hint: '', seen: '', model: '', raw: '', actions: [], taps: [], verdict: '' };
       const page = await gameWin.webContents.capturePage();
       // 等比缩放（不能强制拉伸成固定宽高）：否则画面变形，模型按变形图估的坐标换算回原图会左右偏移
       const rawSz = page.getSize();
@@ -1892,10 +2154,14 @@ async function aiAgentLoop(cfg) {
       const capW = hiRes ? Math.max(720, rawSz.width || 720) : Math.min(720, rawSz.width || 720);
       const scale = rawSz.width > 0 ? capW / rawSz.width : 1;
       const small = page.resize({ width: capW, height: Math.max(1, Math.round(rawSz.height * scale)) });
-      const b64 = small.toJPEG(80).toString('base64');
+      const jpgBuf = small.toJPEG(80);
+      const b64 = jpgBuf.toString('base64');
+      roundRec.jpg = jpgBuf; // trace：本轮发给模型的那张图（原样留存）
       // 记录本轮发给模型的图片尺寸：若模型误用像素坐标描述 box，可按此换算回 0~1
       aiAgent.lastImgW = small.getSize().width;
       aiAgent.lastImgH = small.getSize().height;
+      roundRec.imgW = aiAgent.lastImgW;
+      roundRec.imgH = aiAgent.lastImgH;
       // 记录页面可见内容区尺寸（clientWidth/Height 不含滚动条）：
       // 若网页有滚动条，getContentSize 会比可见区大，用它换算会点偏；这里以真实可见区为准。
       try {
@@ -1919,9 +2185,14 @@ async function aiAgentLoop(cfg) {
       }
       let askText = '请看当前游戏画面';
       if (hint) askText += hint;
+      roundRec.hint = hint; // trace：本轮塞给模型的提示（卡住/上次点击没变化/过关复核等）
       const res = await aiVisionAsk(b64, system, history, askText, visionPick);
+      roundRec.model = res && res.used ? res.used : ''; // trace：实际用的模型（自动降级时记录具体哪家）
+      roundRec.raw = String((res && res.text) || '');   // trace：模型原始返回（含推理文本，便于诊断格式问题）
       if (aiAgent.abort) break; // 等待模型期间用户点了停止 → 立即退出，不再执行后续动作
       if (!res.ok) {
+        roundRec.verdict = 'api-fail:' + String(res.error || '').slice(0, 120); // trace：模型调用失败也留档（含截图，便于看当时画面）
+        traceRound(roundRec);
         if (aiAgent.abort || res.error === '已停止') break;
         // aiVisionAsk 内部已完成重试与退避等待；这里只做极短暂停顿就进入下一轮，避免双重等待白等几秒
         setStatus('视觉决策失败：' + res.error + '（马上重试）', { aiPlaying: true });
@@ -1934,6 +2205,8 @@ async function aiAgentLoop(cfg) {
         let why = diagnoseBadAction(res.text, act);
         if (res.truncated) why = '输出被长度上限截断，未生成完整 JSON（模型输出过长，可换非推理模型）｜' + why;
         console.log('[ai-bad] 第' + badRounds + '次无效动作 | 原因: ' + why + ' | 原始返回: ' + String(res.text || '').slice(0, 300));
+        roundRec.verdict = 'invalid:' + why; // trace：无效动作也留档
+        traceRound(roundRec);
         if (badRounds >= MAX_BAD) {
           setStatus('模型连续 ' + badRounds + ' 轮未返回有效动作，已自动停止。最后原因：' + why + '（可换个模型或调整指令后重试）', { aiPlaying: false });
           aiAgent.playing = false;
@@ -1946,6 +2219,9 @@ async function aiAgentLoop(cfg) {
       badRounds = 0;
       const who = res.used || '视觉模型';
       aiAgent.note = String(act.reasoning || act.note || '');
+      roundRec.seen = aiAgent.note; // trace：模型对画面的判断
+      roundRec.actions = act.actions.slice(0, 3); // trace：本轮动作（含 box 坐标）
+      roundRec.done = !!act.done; // trace：模型是否自称通关
       setStatus('AI 看到：' + (aiAgent.note || '') + '（' + who + '）', { aiPlaying: true });
       let tapped = false;
       // 记录本轮实际做过的点击（用于下一轮告诉模型"你刚才点了哪里、有没有生效"）
@@ -1965,11 +2241,15 @@ async function aiAgentLoop(cfg) {
           const posDesc = (pt.via === 'box' && Array.isArray(ac.box))
             ? ('「' + (ac.label || '目标') + '」框中心(' + pt.x + ',' + pt.y + ')')
             : ('(' + pt.x + ',' + pt.y + ')');
-          if (!okTap) { setStatus('模型给出非法坐标 ' + posDesc + '，已跳过本次点击', { aiPlaying: true }); }
+          if (!okTap) {
+            roundRec.taps.push({ x: pt.x, y: pt.y, box: ac.box || null, label: ac.label || '', okTap: false });
+            setStatus('模型给出非法坐标 ' + posDesc + '，已跳过本次点击', { aiPlaying: true });
+          }
           else {
             // 点击后校验：等画面响应后重新截图，与点击前比对判断这次点击是否真的生效
             const changed = await waitScreenChange(before, 2600);
             doneTaps.push({ x: pt.x, y: pt.y, changed });
+            roundRec.taps.push({ x: pt.x, y: pt.y, via: pt.via || '', box: ac.box || null, label: ac.label || '', changed, okTap: true });
             if (!changed) setStatus('点击 ' + posDesc + ' 后画面无视觉变化（可能点空/等输入/无需变化）', { aiPlaying: true });
           }
           if (okTap && oneShot) { tapped = true; break; } // 单次任务：点完即停，不再执行后续动作
@@ -1977,7 +2257,7 @@ async function aiAgentLoop(cfg) {
         else if (ac.type === 'wait') { await sleep(Math.max(200, Number(ac.ms) || 500)); }
         else if (ac.type === 'restart') { if (gameWin && !gameWin.isDestroyed()) gameWin.webContents.reload(); await sleep(1200); }
       }
-      if (aiAgent.abort) break; // 动作执行期间被停止 → 结束主循环
+      if (aiAgent.abort) { roundRec.verdict = 'aborted-mid-actions'; traceRound(roundRec); break; } // 动作执行期间被停止 → 结束主循环
       // 若本轮有点击但画面没变，把这条实测反馈交给下一轮提示词（比让模型自己猜准得多）
       const misses = doneTaps.filter(t => !t.changed);
       if (misses.length) {
@@ -1998,7 +2278,10 @@ async function aiAgentLoop(cfg) {
         history.push({ role: 'user', content: '[近期操作记录] ' + desc + '。若某处已点过且画面无变化，不要在原地重复点击，请重新定位目标。' });
       }
       // 单次任务代码层兜底：执行过一次 tap 即强制停止，不依赖模型 done 判定（模型常不遵守）
-      if (oneShot && tapped) { setStatus('AI 完成单次点击：' + String(act.reasoning || goal) + '（已点一次，停止）', { aiPlaying: false }); aiAgent.playing = false; break; }
+      if (oneShot && tapped) {
+        roundRec.verdict = 'oneShot-done'; traceRound(roundRec);
+        setStatus('AI 完成单次点击：' + String(act.reasoning || goal) + '（已点一次，停止）', { aiPlaying: false }); aiAgent.playing = false; break;
+      }
       // 模型自称通关：不轻信。需连续两轮都判断通关才真正停止，避免"把错答案当成已通关"直接结束。
       if (act.done) {
         doneClaims++;
@@ -2010,11 +2293,13 @@ async function aiAgentLoop(cfg) {
           stuck = 0;
           badRounds = 0; // 无效动作计数也重置，避免跨关累积导致误停
           if (oneShot) {
+            roundRec.verdict = 'oneShot-done'; traceRound(roundRec);
             setStatus('AI 完成：' + String(act.reasoning || '完成') + '（单次任务结束）', { aiPlaying: false });
             aiAgent.playing = false;
             break;
           }
           // 持续任务：不停止，进入下一关继续（游戏通常会自动进下一关，等画面稳定后再决策）
+          roundRec.verdict = 'level-pass-' + levelCount; traceRound(roundRec);
           levelCount++;
           setStatus('✅ 第 ' + levelCount + ' 关通过，继续下一关…', { aiPlaying: true });
           lastTapFeedback = '（刚刚已经通过上一关，现在进入新的一关，请按当前这一关的画面重新分析作答。）';
@@ -2022,6 +2307,7 @@ async function aiAgentLoop(cfg) {
           continue;
         }
         // 第一次说 done：只复核，不停止
+        roundRec.verdict = 'done-unconfirmed'; traceRound(roundRec);
         lastTapFeedback = '（重要：你上一轮说已通关。请再确认一次画面是否真的显示通关/成功' +
           '（例如出现下一关、成功提示、进度推进、答案被判定为正确）。' +
           '若只是答案格被填满但游戏并未过关，说明答案是错的，请删掉并换一个全新的答案。' +
@@ -2030,11 +2316,14 @@ async function aiAgentLoop(cfg) {
         continue;
       }
       doneClaims = 0; // 本轮没声称通关，清零
+      roundRec.verdict = roundRec.verdict || 'normal'; // trace：正常轮
+      traceRound(roundRec);
     }
   } catch (err) {
     setStatus('AI 智能决策异常：' + String((err && err.message) || err), { aiPlaying: false });
   }
   aiAgent.playing = false;
+  traceEnd(aiAgent.abort ? 'stopped' : 'ended');
   setStatus(aiAgent.abort ? 'AI 智能决策已停止' : 'AI 智能决策结束', { aiPlaying: false });
 }
 ipcMain.on('aiAgent:start', (e, cfg) => {
@@ -2047,6 +2336,45 @@ ipcMain.on('aiAgent:start', (e, cfg) => {
 });
 ipcMain.on('aiAgent:stop', () => { if (aiAgent.playing) { aiAgent.abort = true; setStatus('正在停止 AI 智能决策…', { aiPlaying: true }); } });
 ipcMain.handle('aiAgent:state', () => ({ playing: aiAgent.playing, note: aiAgent.note }));
+// 决策记录：打开目录 / 查询列表 / 开关
+ipcMain.handle('aiTrace:openDir', async () => {
+  // shell.openPath 失败时不抛异常，而是返回错误字符串——必须检查，否则会静默失败
+  try {
+    await fs.promises.mkdir(TRACE_DIR, { recursive: true });
+    const err = await shell.openPath(TRACE_DIR);
+    if (!err) return { ok: true, opened: TRACE_DIR };
+    // 空目录 + 工作区根继承的 Deny ACE 时，Explorer 可能打不开这个子目录；
+    // 回退到打开父目录 config（用户可手动点进 ai-trace），并如实回报
+    console.log('[ai-trace] openPath 失败：' + err + '，回退打开 config 目录');
+    const err2 = await shell.openPath(CONFIG_DIR);
+    if (!err2) return { ok: true, opened: CONFIG_DIR, fallback: true, note: '记录目录直接打开失败，已打开配置目录，请手动进入 ai-trace 文件夹：' + err };
+    return { ok: false, error: err };
+  } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
+});
+ipcMain.handle('aiTrace:list', () => {
+  const out = [];
+  try {
+    for (const name of fs.readdirSync(TRACE_DIR)) {
+      const dir = path.join(TRACE_DIR, name);
+      const file = path.join(dir, 'trace.json');
+      if (!fs.existsSync(file)) continue;
+      try {
+        const t = JSON.parse(fs.readFileSync(file, 'utf8'));
+        out.push({ id: t.id, startedAt: t.startedAt || 0, endAt: t.endAt || 0, goal: t.goal || '',
+                   rounds: (t.rounds || []).length, end: t.end || '', dir });
+      } catch (e) {}
+    }
+  } catch (e) {}
+  return out.sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0)).slice(0, 30);
+});
+ipcMain.handle('aiTrace:enabled', () => traceEnabled());
+ipcMain.handle('aiTrace:setEnabled', (e, on) => {
+  if (!clientConfig) clientConfig = loadClientConfig();
+  if (!clientConfig.aiChat) clientConfig.aiChat = {};
+  clientConfig.aiChat.aiTrace = !!on;
+  writeClientConfigFile();
+  return { ok: true, enabled: !!on };
+});
 // 列出可选模型：auto(自动降级) + 各已配置 Key 的具体模型，文本/视觉分开返回
 ipcMain.handle('aiAgent:models', () => {
   const build = (pool, autoLabel) => {
@@ -2172,8 +2500,8 @@ ipcMain.handle('models:fetchList', async (e, p) => {
     return { ok: false, error: String((err && err.message) || err) };
   } finally { clearTimeout(timer); }
 });
-// 打开配置文件（模型配置页右上角按钮）
-ipcMain.handle('models:openConfig', async () => { try { await shell.openPath(CONFIG_PATH); return { ok: true }; } catch (e) { return { ok: false, error: String((e && e.message) || e) }; } });
+// 打开模型配置文件（模型配置页右上角按钮）—— 现在指向独立的 models.json
+ipcMain.handle('models:openConfig', async () => { try { await shell.openPath(MODELS_PATH); return { ok: true }; } catch (e) { return { ok: false, error: String((e && e.message) || e) }; } });
 // ---------- 弹幕自动回复（非官方：浏览器自动化抓直播间） ----------
 // 采集器在 src/preload-danmaku.js：document-start 自动注入、只观察聊天容器、推模式上报、带健康检查与自愈。
 // 主进程这里只负责：窗口生命周期、把采集器/探针的消息转发给主界面、以及「阶段0」WS 探针。

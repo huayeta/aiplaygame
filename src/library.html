@@ -208,6 +208,25 @@
   #viewModel .md-newbox { background:#15162a; border:1px solid #2a2d52; border-radius:16px; padding:20px 22px; margin-top:18px; }
   #viewModel .md-newtitle { font-size:14px; font-weight:700; color:#e8e9f5; margin-bottom:6px; }
   #viewModel .md-newsub { font-size:12px; color:#9aa0c8; margin-bottom:16px; line-height:1.6; }
+  /* 配置模板 */
+  .tpl-card { background:#15162a; border:1px solid #2a2d52; border-radius:16px; padding:16px 18px; display:flex; flex-direction:column; gap:10px; }
+  .tpl-card.active { border-color:#22d39a; box-shadow:0 0 0 1px rgba(34,211,154,.3); }
+  .tpl-card .tpl-hd { display:flex; align-items:center; gap:8px; }
+  .tpl-card .tpl-name { font-size:15px; font-weight:700; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .tpl-card .tpl-badge { font-size:10px; padding:2px 7px; border-radius:6px; background:rgba(139,92,255,.2); color:#c9b8ff; flex:none; }
+  .tpl-card .tpl-badge.on { background:rgba(34,211,154,.18); color:#22d39a; }
+  .tpl-card .tpl-note { font-size:12px; color:#9aa0c8; min-height:18px; line-height:1.5; word-break:break-all; }
+  .tpl-card .tpl-meta { font-size:11px; color:#6b7094; }
+  .tpl-card .tpl-btns { display:flex; gap:6px; flex-wrap:wrap; }
+  .tpl-card .tpl-btns button { padding:6px 10px; font-size:12px; border-radius:8px; border:none; cursor:pointer; font-weight:600; }
+  .tpl-load { background:#22d39a; color:#0f1020; }
+  .tpl-copy, .tpl-edit { background:#2a2d52; color:#cfd2ee; }
+  .tpl-del { background:#3a1d2a; color:#f87171; }
+  .tpl-cover { background:#2a2d52; color:#fbbf24; }
+  .tpl-bind-row { display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid #232645; font-size:13px; flex-wrap:wrap; }
+  .tpl-bind-row .bn { flex:1; min-width:120px; }
+  .tpl-bind-row select { padding:6px 10px; border-radius:8px; border:1px solid #2a2d52; background:#0f1020; color:#e8e9f5; font-size:12px; }
+  .tpl-bind-row label { font-size:12px; color:#9aa0c8; display:inline-flex; align-items:center; gap:5px; }
 </style>
 </head>
 <body>
@@ -217,6 +236,7 @@
     <div class="side-item" id="navAI">🎙 AI 主播</div>
     <div class="side-item" id="navDanmaku">💬 弹幕回复</div>
     <div class="side-item" id="navModel">🧩 模型配置</div>
+    <div class="side-item" id="navTpl">📋 配置模板</div>
     <div class="side-item" id="navVoice">🎤 声音克隆</div>
     <div class="side-item" id="navDevice">🔊 声音设备</div>
     <button class="side-item" id="openVoiceQueue" style="border:none;cursor:pointer;text-align:left;background:#1c1e38;color:#e7e9f7;justify-content:flex-start;">🔊 语音队列</button>
@@ -550,6 +570,46 @@
       </div>
     </div>
 
+    <!-- 配置模板页 -->
+    <div id="viewTpl" style="display:none;padding:20px 28px 20px;width:100%;">
+      <h2 style="font-size:18px;margin-bottom:6px;">📋 配置模板</h2>
+      <p class="sub" style="font-size:12px;color:#9aa0c8;margin-bottom:16px;max-width:760px;line-height:1.6;">
+        一套模板 = 当前 AI 答疑 / TTS 播报 / 弹幕互动的全部设置（话术、引擎、音色、开关等）。<b>模型 Key 不进模板</b>，仍在「🧩 模型配置」全局共用。
+        可给不同游戏保存不同模板，打开游戏时自动切换。
+      </p>
+      <div class="row field" style="gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px;">
+        <button class="dmb dmb-g" id="tplSaveCurrent">💾 保存当前为新模板</button>
+        <button class="dmb dmb-b" id="tplAddBlank">➕ 添加空白模板</button>
+        <button class="dmb dmb-b" id="tplOpenDir">📂 打开模板目录</button>
+        <button class="dmb dmb-b" id="tplRefresh">🔄 刷新</button>
+        <span id="tplActive" style="font-size:12px;color:#22d39a;margin-left:6px;"></span>
+      </div>
+      <div id="tplList" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;"></div>
+      <!-- 模板输入弹窗（替代 Electron 里失效的 prompt） -->
+      <div id="tplModalMask" class="modal-mask" style="z-index:1001;">
+        <div class="modal">
+          <h3 id="tplModalTitle">输入</h3>
+          <label id="tplModalLabel">名称</label>
+          <input type="text" id="tplModalInput" autocomplete="off">
+          <div id="tplModalNoteWrap" style="display:none;">
+            <label>备注（可留空）</label>
+            <textarea id="tplModalNote" placeholder="给这套模板写点说明，方便以后区分"></textarea>
+          </div>
+          <div class="actions">
+            <button class="ghost" id="tplModalCancel" style="background:#2a2d52;color:#cfd2ee;">取消</button>
+            <button class="primary" id="tplModalOk" style="background:linear-gradient(135deg,#8b5cff,#ff5ca8);color:#fff;">确定</button>
+          </div>
+        </div>
+      </div>
+      <div id="tplBindBox" style="margin-top:22px;padding:18px 20px;background:#15162a;border:1px solid #2a2d52;border-radius:16px;max-width:900px;">
+        <div style="font-size:14px;font-weight:700;color:#e8e9f5;margin-bottom:4px;">🎮 游戏绑定模板</div>
+        <p class="sub" style="font-size:12px;color:#9aa0c8;margin-bottom:12px;line-height:1.6;">
+          给游戏指定模板；勾选「自动」后，打开该游戏时会自动加载对应模板（当前未保存的改动会被覆盖，请留意）。
+        </p>
+        <div id="tplBindList"></div>
+      </div>
+    </div>
+
     <!-- 声音设备设置页 -->
     <div id="viewDevice" style="display:none;padding:26px 28px 20px;width:100%;">
       <h2 style="font-size:18px;margin-bottom:6px;">🔊 声音设备</h2>
@@ -669,15 +729,18 @@
     document.getElementById('navAI').classList.toggle('active', active === 'ai');
     document.getElementById('navDanmaku').classList.toggle('active', active === 'dm');
     document.getElementById('navModel').classList.toggle('active', active === 'md');
+    document.getElementById('navTpl').classList.toggle('active', active === 'tpl');
     document.getElementById('navVoice').classList.toggle('active', active === 'vc');
     document.getElementById('navDevice').classList.toggle('active', active === 'dev');
     document.getElementById('viewLibrary').style.display = active === 'lib' ? '' : 'none';
     document.getElementById('viewAI').style.display = active === 'ai' ? '' : 'none';
     document.getElementById('viewDanmaku').style.display = active === 'dm' ? 'flex' : 'none';
     document.getElementById('viewModel').style.display = active === 'md' ? 'block' : 'none';
+    document.getElementById('viewTpl').style.display = active === 'tpl' ? 'block' : 'none';
     document.getElementById('viewVoice').style.display = active === 'vc' ? 'flex' : 'none';
     document.getElementById('viewDevice').style.display = active === 'dev' ? 'block' : 'none';
     if (active === 'md') mdLoad();
+    if (active === 'tpl') tplRender();
     if (active === 'vc') loadVoices();
     if (active === 'dev') loadDevices();
   }
@@ -685,6 +748,7 @@
   document.getElementById('navAI').onclick = () => setNav('ai');
   document.getElementById('navDanmaku').onclick = () => setNav('dm');
   document.getElementById('navModel').onclick = () => setNav('md');
+  document.getElementById('navTpl').onclick = () => setNav('tpl');
   document.getElementById('navVoice').onclick = () => setNav('vc');
   document.getElementById('navDevice').onclick = () => setNav('dev');
   function openEdit(g) { openModal('编辑游戏', g); }
@@ -2366,6 +2430,175 @@
   }
   // 延迟一点加载，确保动态填充的 select（音色列表等）先就绪再回填
   setTimeout(cfgLoadAll, 600);
+  // 加载模板后主进程会通知界面重新回填所有控件
+  if (window.api.onTemplateLoaded) window.api.onTemplateLoaded((d) => {
+    cfgLoadAll();
+    if (d && d.id) {
+      const el = document.getElementById('tplActive');
+      if (el) el.textContent = '当前模板：' + d.id;
+    }
+    tplRender();
+  });
+
+  // ---------- 配置模板页 ----------
+  let tplData = { activeId: '', templates: [] };
+  let gamesForBind = [];
+  // 自定义输入弹窗：Electron 不支持 window.prompt（静默返回 null），用页面内 modal 替代
+  function tplPrompt(opt) {
+    return new Promise(resolve => {
+      const mask = document.getElementById('tplModalMask');
+      const title = document.getElementById('tplModalTitle');
+      const label = document.getElementById('tplModalLabel');
+      const input = document.getElementById('tplModalInput');
+      const noteWrap = document.getElementById('tplModalNoteWrap');
+      const note = document.getElementById('tplModalNote');
+      const okBtn = document.getElementById('tplModalOk');
+      const cancelBtn = document.getElementById('tplModalCancel');
+      if (!mask || !input) return resolve(null);
+      title.textContent = opt.title || '输入';
+      label.textContent = opt.label || '名称';
+      input.value = opt.value == null ? '' : String(opt.value);
+      input.placeholder = opt.placeholder || '';
+      noteWrap.style.display = opt.withNote ? 'block' : 'none';
+      note.value = opt.note == null ? '' : String(opt.note);
+      mask.style.display = 'flex';
+      let done = false;
+      const finish = (val) => {
+        if (done) return;
+        done = true;
+        mask.style.display = 'none';
+        okBtn.onclick = null; cancelBtn.onclick = null;
+        input.onkeydown = null;
+        resolve(val);
+      };
+      okBtn.onclick = () => finish({ name: input.value, note: note.value });
+      cancelBtn.onclick = () => finish(null);
+      input.onkeydown = (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); finish({ name: input.value, note: note.value }); }
+        else if (e.key === 'Escape') { e.preventDefault(); finish(null); }
+      };
+      setTimeout(() => { try { input.focus(); input.select(); } catch (e) {} }, 50);
+    });
+  }
+  const tplEsc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  function tplFmtTime(ts) {
+    if (!ts) return '—';
+    const d = new Date(ts);
+    return isNaN(d.getTime()) ? '—' : (d.getMonth() + 1) + '/' + d.getDate() + ' ' + d.toTimeString().slice(0, 5);
+  }
+  async function tplRender() {
+    try { tplData = await window.api.tplList() || { activeId: '', templates: [] }; } catch (e) { tplData = { activeId: '', templates: [] }; }
+    const box = document.getElementById('tplList');
+    if (!box) return;
+    const act = document.getElementById('tplActive');
+    if (act) act.textContent = tplData.activeId ? ('当前模板：' + tplData.activeId) : '当前：未使用模板（直接编辑的当前配置）';
+    const list = tplData.templates || [];
+    if (!list.length) {
+      box.innerHTML = '<div style="color:#9aa0c8;font-size:13px;">还没有模板。点上方「保存当前为新模板」把现在这套配置存一份，或「添加空白模板」。</div>';
+    } else {
+      box.innerHTML = list.map(t => {
+        const isActive = t.id === tplData.activeId;
+        const secs = (t.sections || []).map(s => ({ aiChat: 'AI答疑', tts: '播报', danmaku: '弹幕' }[s] || s)).join(' / ');
+        const binds = (t.boundGames || []).map(g => tplEsc(g.name) + (g.auto ? '(自动)' : '')).join('、');
+        return '<div class="tpl-card' + (isActive ? ' active' : '') + '" data-id="' + tplEsc(t.id) + '">' +
+          '<div class="tpl-hd"><span class="tpl-name" title="' + tplEsc(t.name) + '">' + tplEsc(t.name) + '</span>' +
+            (isActive ? '<span class="tpl-badge on">使用中</span>' : '') +
+            (t.builtin ? '<span class="tpl-badge">内置</span>' : '') + '</div>' +
+          '<div class="tpl-note">' + (t.note ? tplEsc(t.note) : '<span style="color:#5a5f85;">无备注</span>') + '</div>' +
+          '<div class="tpl-meta">' + tplEsc(secs || '空模板') + '　·　更新 ' + tplFmtTime(t.updatedAt) +
+            (binds ? '　·　绑定：' + binds : '') + '</div>' +
+          '<div class="tpl-btns">' +
+            '<button class="tpl-load" data-act="load">加载</button>' +
+            '<button class="tpl-cover" data-act="overwrite" title="用当前配置覆盖这个模板">覆盖</button>' +
+            '<button class="tpl-copy" data-act="copy">复制</button>' +
+            '<button class="tpl-edit" data-act="rename">改名</button>' +
+            (t.builtin ? '' : '<button class="tpl-del" data-act="del">删除</button>') +
+          '</div></div>';
+      }).join('');
+      box.querySelectorAll('.tpl-card').forEach(card => {
+        const id = card.dataset.id;
+        card.querySelectorAll('button[data-act]').forEach(btn => {
+          btn.onclick = () => tplAction(btn.dataset.act, id);
+        });
+      });
+    }
+    await tplRenderBind(list);
+  }
+  async function tplRenderBind(templates) {
+    const box = document.getElementById('tplBindList');
+    if (!box) return;
+    try { gamesForBind = await window.api.listGames(); } catch (e) { gamesForBind = []; }
+    const opts = templates.map(t => '<option value="' + tplEsc(t.id) + '">' + tplEsc(t.name) + '</option>').join('');
+    if (!gamesForBind.length) { box.innerHTML = '<div style="font-size:12px;color:#6b7094;">游戏库为空，先在「🎮 游戏库」添加游戏</div>'; return; }
+    box.innerHTML = gamesForBind.map(g => {
+      const tid = g.templateId || '';
+      return '<div class="tpl-bind-row" data-gid="' + tplEsc(g.id) + '">' +
+        '<span class="bn">' + tplEsc(g.name) + '</span>' +
+        '<select class="tpl-sel"><option value="">（不绑定）</option>' + opts + '</select>' +
+        '<label><input type="checkbox" class="tpl-auto"' + (g.autoTemplate ? ' checked' : '') + '> 自动</label>' +
+        '</div>';
+    }).join('');
+    box.querySelectorAll('.tpl-bind-row').forEach(row => {
+      const gid = row.dataset.gid;
+      const g = gamesForBind.find(x => x.id === gid);
+      const sel = row.querySelector('.tpl-sel');
+      if (g && g.templateId) sel.value = g.templateId;
+      const apply = async () => {
+        const r = await window.api.tplBindGame({ gameId: gid, templateId: sel.value, auto: row.querySelector('.tpl-auto').checked });
+        if (r && r.ok) { gamesForBind = r.games || gamesForBind; tplRender(); }
+      };
+      sel.onchange = apply;
+      row.querySelector('.tpl-auto').onchange = apply;
+    });
+  }
+  async function tplAction(act, id) {
+    const t = (tplData.templates || []).find(x => x.id === id) || {};
+    if (act === 'load') {
+      if (!confirm('加载模板「' + (t.name || id) + '」？当前未保存的配置改动会被覆盖。')) return;
+      const r = await window.api.tplLoad(id);
+      if (!r || !r.ok) alert('加载失败：' + ((r && r.error) || '未知错误'));
+    } else if (act === 'overwrite') {
+      if (!confirm('用「当前配置」覆盖模板「' + (t.name || id) + '」？')) return;
+      const r = await window.api.tplOverwrite(id);
+      if (!r || !r.ok) alert('覆盖失败：' + ((r && r.error) || '未知错误'));
+    } else if (act === 'copy') {
+      const v = await tplPrompt({ title: '复制模板', label: '新模板名称', value: (t.name || '模板') + ' 副本', withNote: true, note: t.note || '' });
+      if (!v || !v.name || !v.name.trim()) return;
+      const r = await window.api.tplAdd({ name: v.name.trim(), note: v.note || '', from: id });
+      if (!r || !r.ok) alert('复制失败：' + ((r && r.error) || '未知错误'));
+    } else if (act === 'rename') {
+      const v = await tplPrompt({ title: '重命名模板', label: '名称', value: t.name || '', withNote: true, note: t.note || '' });
+      if (!v || !v.name || !v.name.trim()) return;
+      await window.api.tplUpdate({ id, name: v.name.trim(), note: v.note || '' });
+    } else if (act === 'del') {
+      if (!confirm('删除模板「' + (t.name || id) + '」？绑定它的游戏会自动解绑。')) return;
+      const r = await window.api.tplDelete(id);
+      if (!r || !r.ok) alert('删除失败：' + ((r && r.error) || '未知错误'));
+    }
+    tplRender();
+  }
+  document.getElementById('tplSaveCurrent').onclick = async () => {
+    const v = await tplPrompt({
+      title: '保存当前为新模板', label: '模板名称',
+      value: '模板 ' + new Date().toLocaleString('zh-CN', { hour12: false }),
+      withNote: true, note: ''
+    });
+    if (!v || !v.name || !v.name.trim()) return;
+    const r = await window.api.tplAdd({ name: v.name.trim(), note: v.note || '', from: 'current' });
+    if (!r || !r.ok) alert('保存失败：' + ((r && r.error) || '未知错误'));
+    else tplRender();
+  };
+  document.getElementById('tplAddBlank').onclick = async () => {
+    const v = await tplPrompt({
+      title: '添加空白模板', label: '模板名称', value: '空白模板', withNote: true, note: ''
+    });
+    if (!v || !v.name || !v.name.trim()) return;
+    const r = await window.api.tplAdd({ name: v.name.trim(), note: v.note || '', from: 'blank' });
+    if (!r || !r.ok) alert('添加失败：' + ((r && r.error) || '未知错误'));
+    else tplRender();
+  };
+  document.getElementById('tplOpenDir').onclick = () => { window.api.tplOpenDir(); };
+  document.getElementById('tplRefresh').onclick = () => tplRender();
 
   // ---------- 模型配置页（独立管理所有提供商） ----------
   let mdProviders = [];

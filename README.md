@@ -21,7 +21,7 @@ env -u ELECTRON_RUN_AS_NODE ./node_modules/electron/dist/Electron.app/Contents/M
 
 ## 功能总览
 
-左侧 6 个页面：
+左侧 7 个页面：
 
 | 页面 | 作用 |
 |---|---|
@@ -29,6 +29,7 @@ env -u ELECTRON_RUN_AS_NODE ./node_modules/electron/dist/Electron.app/Contents/M
 | 🎙 AI 主播 | 文本朗读、定时播报、背景音乐、声音克隆 |
 | 💬 弹幕回复 | 连接抖音直播间抓弹幕，弹幕朗读、AI 读弹幕答疑 |
 | 🧩 模型配置 | 所有大模型提供商的统一配置中心 |
+| 📋 配置模板 | 把 AI 答疑/播报/弹幕设置存成多套模板，按游戏切换 |
 | 🎤 声音克隆 | GPT-SoVITS 零样本克隆专属音色 |
 | 🔊 声音设备 | 把 AI 语音定向输出到虚拟声卡（进直播间） |
 
@@ -75,6 +76,24 @@ env -u ELECTRON_RUN_AS_NODE ./node_modules/electron/dist/Electron.app/Contents/M
   提示词教模型按 10 等分定位小目标；非法坐标（`undefined`/`NaN`）安全跳过。
 - **调试日志**：每次点击打印 `[doTap] 模型坐标(0.35,0.78) → 像素(145,574) 窗口414x736`，便于排查点偏。
 
+### 决策记录（trace）—— 复盘 AI 点偏的利器
+每次「AI 开始」会建一个会话目录 `config/ai-trace/T<时间戳>/`，把每一轮都落盘：
+
+```
+meta.json     指令 / 游戏 / 模型 / 单次或持续
+shot-001.jpg  这一轮真正发给模型的那张截图（按轮编号）
+shot-002.jpg
+trace.json    每轮：画面判断(seen)、给模型的提示(hint)、模型原始返回(raw)、
+              解析出的动作(actions，含 box)、实际点击坐标与是否生效(taps)、结论(verdict)
+```
+
+排查时打开 `trace.json` 找到出问题的轮次，直接看同编号的 `shot-xxx.jpg`，就能确认
+「模型看到的是什么 / 它说要点哪 / 程序实际点了哪 / 点完有没有生效」——不用翻控制台日志猜。
+
+- 控制台「📂 查看记录」按钮直接打开 `config/ai-trace/` 目录
+- 「记录决策过程」勾选框可关（默认开，存 `client-config.json` 的 `aiChat.aiTrace`）
+- 只保留每会话最近 200 轮，避免长时间挂机撑爆磁盘
+
 ### 已验证的关键结论（针对 Unity WebGL 游戏）
 - 游戏是 **Unity WebGL**，逻辑编译成 WASM，无法直接 hook 内部状态。
 - **软点击（注入 JS 派发事件）无效**，游戏不响应。
@@ -93,6 +112,17 @@ env -u ELECTRON_RUN_AS_NODE ./node_modules/electron/dist/Electron.app/Contents/M
 **所有提供商一律是"自定义配置"**，没有内置特殊待遇。每个提供商包含：
 
 `Provider ID` / `显示名称` / `API 地址` / `API Key` / `文本模型` / `视觉模型`
+
+所有提供商配置**单独存放在 `config/models.json`**，不再混在 `client-config.json` 里：
+
+```json
+{ "version": 1, "providers": [ { "id": "...", "base": "...", "key": "...", "textModel": "...", "visionModel": "..." } ] }
+```
+
+- 内存里仍以 `clientConfig.aiChat.customProviders` 为统一数据源，各模块读取方式不变；
+  只在落盘时分流：模型列表写 `models.json`，其余写 `client-config.json`。
+- 首次启动会**自动把旧版 `client-config.json` 里的模型配置迁移到 `models.json`**，不丢数据。
+- 模型配置页右上角「打开配置文件」按钮现在打开的是 `models.json`。
 
 ### 自动获取模型
 填好地址和 Key 后点「🔄 自动获取模型」，拉取 `/models` 并自动分类：
@@ -113,6 +143,25 @@ env -u ELECTRON_RUN_AS_NODE ./node_modules/electron/dist/Electron.app/Contents/M
 ### 旧配置迁移
 首次加载时会把旧版内置的 4 家（DeepSeek / 智谱 / 硅基流动 / 商汤）已填的 Key 与模型
 **自动迁移进自定义配置**，不丢数据；全新安装则预置 4 张空卡片（带默认 API 地址），填 Key 即可用。
+
+---
+
+## 三·补、配置模板（按游戏切换配置）
+
+左侧「📋 配置模板」页可以把一整套配置（AI 答疑 / TTS 播报 / 弹幕互动的话术与开关）存成模板，
+存到 `config/templates/*.json`，针对不同游戏一键切换：
+
+- **保存当前为新模板**：把界面上现在这套配置存一份（可填名称和备注）
+- **添加空白模板**：新建空模板；**复制**：基于已有模板克隆一份再改
+- **加载**：把模板套用为当前配置（界面所有控件自动刷新）
+- **覆盖**：用当前配置更新某个模板；**改名 / 删除**：管理模板
+- 首次启动自动生成一份内置的「默认配置」模板，可复制/修改/删除
+
+**按游戏自动切换**：页面下方「游戏绑定模板」区，给游戏选一个模板并勾选「自动」——
+打开该游戏时会自动加载对应模板（**会覆盖当前未保存的改动**，请留意）。
+
+> 模型 Key 不进模板（仍在全局 `config/models.json`），所以换模板不影响 API 连接，
+> 只有 `aiModelId`（当前选哪个模型）会随模板切换。
 
 ---
 
@@ -228,7 +277,10 @@ src/
   device-guide.html  声音设备配置引导
   preload-*.js       各窗口的预加载脚本
 config/              配置目录（不入版本库）
-  client-config.json   AI 与模型配置（含 API Key）
+  client-config.json   AI 答疑 / TTS / 弹幕等通用配置（含部分 Key）
+  models.json          模型提供商配置（API 地址 / Key / 文本模型 / 视觉模型）—— 已从 client-config 拆出
+  templates/           配置模板（每套一份配置快照，按游戏切换）
+  ai-trace/            AI 决策记录（每会话一个目录：截图 + 决策 JSON）
   games.json           游戏库
   autoplay.json        各游戏的自动玩配置
   scripts/             录制的自动玩脚本（<游戏id>.json）

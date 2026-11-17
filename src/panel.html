@@ -95,6 +95,10 @@
     <div class="row" style="margin-bottom:6px;"><span style="flex:none;width:56px;color:#9aa0c8;font-size:12px;">文本模型</span><select id="aiTextModel" style="flex:1;width:0;min-width:0;box-sizing:border-box;"></select></div>
     <div class="row" style="margin-bottom:8px;"><span style="flex:none;width:56px;color:#9aa0c8;font-size:12px;">视觉模型</span><select id="aiVisionModel" style="flex:1;width:0;min-width:0;box-sizing:border-box;"></select></div>
     <label class="check" style="margin-bottom:8px;"><input type="checkbox" id="aiHiRes"> 高清截图（Retina 原始分辨率，定位更清晰但更慢/更费 token）</label>
+    <div class="row" style="margin-bottom:8px;gap:8px;align-items:center;">
+      <label class="check" style="margin:0;"><input type="checkbox" id="aiTraceChk" checked> 记录决策过程</label>
+      <button class="shot" id="traceOpenDir" style="flex:1;">📂 查看记录</button>
+    </div>
     <div class="aiRow"><button class="aiGo" id="aiGo">▶ AI 开始</button><button class="aiStopBtn" id="aiStopCtl" disabled>■ 停止</button></div>
     <div class="hint" id="aiNote">AI 每步截取游戏画面，让所选视觉模型决策（模型来自「🧩 模型配置」页，选「自动」则按配置顺序降级重试）。游戏规则在「游戏库 → 编辑游戏 → 游戏规则」里填写，填了 AI 更懂怎么玩。</div>
     <div class="t" style="margin-top:12px;">状态（记录变化过程，最新在最上）<button class="clearSt" id="clearStatus">清空</button></div>
@@ -155,6 +159,19 @@
     window.panel.aiStart({ text, textModel: $('aiTextModel').value, visionModel: $('aiVisionModel').value });
   };
   $('aiStopCtl').onclick = () => window.panel.aiStop();
+  // 决策记录：每轮截图+模型判断+坐标+生效结果落盘到 config/ai-trace/，用于复盘 AI 点偏问题
+  if (window.panel.traceEnabled) {
+    window.panel.traceEnabled().then(on => { $('aiTraceChk').checked = on !== false; }).catch(() => {});
+  }
+  $('aiTraceChk').onchange = (e) => { if (window.panel.traceSetEnabled) window.panel.traceSetEnabled(e.target.checked); };
+  $('traceOpenDir').onclick = async () => {
+    const b = $('traceOpenDir');
+    try {
+      const r = await window.panel.traceOpenDir();
+      if (r && r.ok && r.fallback) { b.textContent = '⚠ 已打开上级目录'; setTimeout(() => { b.textContent = '📂 查看记录'; }, 2500); }
+      else if (!r || !r.ok) { alert('打开记录目录失败：' + ((r && r.error) || '未知错误')); }
+    } catch (err) { alert('打开记录目录失败：' + String((err && err.message) || err)); }
+  };
   // 指令输入框内容持久化（存到该游戏的 autoplay 配置里，重开控制台自动回填）
   let aiSaveTimer = null;
   function saveAiInputs() {
