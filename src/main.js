@@ -3,8 +3,9 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const http = require('http');
-const { execFile } = require('child_process');
+const { execFile, execFileSync } = require('child_process');
 const { pathToFileURL } = require('url');
+const dmProto = require('./danmaku-proto'); // 抖音 WS 推送帧 protobuf 解码（零依赖）
 
 const ROOT = app.getAppPath();
 const DATA_DIR = path.join(ROOT, 'src');
@@ -329,18 +330,55 @@ function createAI() {
 }
 
 // ---------- AI 助播：文本朗读 / 定时播报 / 背景音乐 ----------
-const VOICE_TMP = path.join(os.tmpdir(), 'aiassist_voice');
-try { fs.mkdirSync(VOICE_TMP, { recursive: true }); } catch (e) {}
-// 清理合成产生的临时音频（每次合成会新建一个时间戳子目录，不清理会一直堆积）。
+// 合成音频的临时目录：不要写系统 %TEMP%。
+// Windows 上常报 "EPERM: operation not permitted, mkdir ...\Temp\aiassist_voice\..."，
+// 这通常不是 NTFS 权限问题（ACL 显示可写也一样），而是安全软件 / 受控文件夹访问 /
+// 应用沙箱对 %TEMP% 的进程级写入限制。项目其余数据都在 ROOT/config，
+// 临时音频也放这里：既保证可写，又保持"整目录可复制"；ROOT 只读时再逐级回退。
+function voiceTmpCandidates() {
+  const list = [path.join(ROOT, 'config', 'voice-tmp')];
+  try { list.push(path.join(app.getPath('userData'), 'aiassist_voice')); } catch (e) {}
+  try { list.push(path.join(os.tmpdir(), 'aiassist_voice')); } catch (e) {}
+  return list;
+}
+let VOICE_TMP = null; // 实际选中的临时目录，cleanVoiceTmp 用它
+// 启动时探测一次（静默，失败不抛；真正合成时 makeVoiceDir 会再试一遍）
+for (const c of voiceTmpCandidates()) {
+  try {
+    fs.mkdirSync(c, { recursive: true });
+    const probe = path.join(c, '.probe_' + process.pid);
+    fs.writeFileSync(probe, 'ok');
+    fs.unlinkSync(probe);
+    VOICE_TMP = c;
+    break;
+  } catch (e) {}
+}
+// 每次合成新建唯一子目录：逐个候选目录试，第一个能建就用。
+// 用 mkdtempSync 而非 Date.now()——快速连点时两次合成可能撞名，会写进同一个 tts.wav 串音。
+function makeVoiceDir() {
+  let lastErr = null;
+  for (const c of voiceTmpCandidates()) {
+    try {
+      fs.mkdirSync(c, { recursive: true });
+      const dir = fs.mkdtempSync(path.join(c, 'tts-'));
+      VOICE_TMP = c; // 记录实际使用的目录，供 cleanVoiceTmp 清理
+      return dir;
+    } catch (e) { lastErr = e; }
+  }
+  throw new Error('所有临时目录都不可写（' + String((lastErr && lastErr.message) || lastErr || '未知错误') + '）');
+}
+// 清理合成产生的临时音频（每次合成会新建一个子目录，不清理会一直堆积）。
 // 规则：按修改时间从新到旧，保留最近 keepRecent 个；超出部分且大于 olderThanMs 的才删除。
 function cleanVoiceTmp(opt) {
+  const base = VOICE_TMP;
+  if (!base) return;
   const keepRecent = (opt && opt.keepRecent != null) ? opt.keepRecent : 500;
   const olderThanMs = (opt && opt.olderThanMs != null) ? opt.olderThanMs : 2 * 60 * 60 * 1000;
   try {
-    const names = fs.readdirSync(VOICE_TMP);
+    const names = fs.readdirSync(base);
     const items = [];
     for (const n of names) {
-      const p2 = path.join(VOICE_TMP, n);
+      const p2 = path.join(base, n);
       let mt = 0; try { mt = fs.statSync(p2).mtimeMs; } catch (e) { mt = 0; }
       items.push({ p: p2, mt });
     }
@@ -362,6 +400,38 @@ try { cleanVoiceTmp({ keepRecent: 50, olderThanMs: 0 }); } catch (e) {}
 let baiduToken = null;
 let baiduTokenExp = 0;
 
+// 探测可用的 edge-tts Python 解释器（结果缓存）：EDGE_TTS_PYTHON > python3 > python > py -3 > 常见安装路径
+// Windows 上 PATH 里的 python3 可能是微软商店版（未装 edge_tts），逐个探测直到找到能跑 edge_tts 的解释器
+let edgePyInfo = null; // { cmd, prefix }
+function resolveEdgeTtsPython() {
+  if (edgePyInfo) return edgePyInfo;
+  const env = String(process.env.EDGE_TTS_PYTHON || '').trim();
+  const candidates = [];
+  if (env) candidates.push({ cmd: env, prefix: [] });
+  candidates.push(
+    { cmd: 'python3', prefix: [] },
+    { cmd: 'python', prefix: [] },
+    { cmd: 'py', prefix: ['-3'] },
+    { cmd: 'C:\\Python310\\python.exe', prefix: [] },
+    { cmd: 'C:\\Python311\\python.exe', prefix: [] },
+    { cmd: 'C:\\Python312\\python.exe', prefix: [] },
+    { cmd: 'D:\\Python310\\python.exe', prefix: [] },
+    { cmd: 'D:\\Python311\\python.exe', prefix: [] },
+    { cmd: 'D:\\Python312\\python.exe', prefix: [] },
+    { cmd: 'E:\\Python310\\python.exe', prefix: [] },
+    { cmd: 'E:\\Python311\\python.exe', prefix: [] },
+    { cmd: 'E:\\Python312\\python.exe', prefix: [] }
+  );
+  for (const c of candidates) {
+    try {
+      execFileSync(c.cmd, c.prefix.concat(['-m', 'edge_tts', '--help']), { timeout: 8000, windowsHide: true, stdio: 'ignore' });
+      edgePyInfo = c;
+      return c;
+    } catch (e) { /* 该候选不可用，试下一个 */ }
+  }
+  return null;
+}
+
 ipcMain.handle('ai:open', () => createAI());
 
 // 合成语音，返回本地 file:// 音频 URL（edge-tts / 本地 GPT-SoVITS / 阿里云 Qwen3-TTS）
@@ -370,9 +440,13 @@ ipcMain.handle('ai:tts', async (e, opts) => {
   if (!text) return { ok: false, err: '文案为空' };
   const engine = (opts && opts.engine) || 'edge';
   const speed = Number(opts && opts.speed) || 1; // 0.5 ~ 2.0
-  const dir = path.join(VOICE_TMP, String(Date.now()));
+  let dir;
+  try { dir = makeVoiceDir(); }
+  catch (err) {
+    return { ok: false, err: '无法创建语音临时目录：' + String((err && err.message) || err) +
+      '。请把软件放在有写权限的目录（不要放 Program Files / 只读盘），或检查安全软件/受控文件夹访问是否拦截了本程序。' };
+  }
   try {
-    fs.mkdirSync(dir, { recursive: true });
     try { cleanVoiceTmp(); } catch (e) {} // 运行中轻量清理（默认只删>2h且超过500个的旧文件，不误删在用的）
 
     if (engine === 'sovits') {
@@ -459,12 +533,13 @@ ipcMain.handle('ai:tts', async (e, opts) => {
     const outPath = path.join(dir, 'tts.mp3');
     const txtPath = path.join(dir, 'text.txt');
     fs.writeFileSync(txtPath, text, 'utf8');
-    const py = process.env.EDGE_TTS_PYTHON || 'python3';
+    const pyInfo = resolveEdgeTtsPython();
+    if (!pyInfo) return { ok: false, err: 'edge-tts 云端合成失败（未找到可用的 Python：请先 pip install -U edge-tts，或设置 EDGE_TTS_PYTHON 指向已安装 edge-tts 的 python，可改用本地 GPT-SoVITS 引擎）' };
     const synthOk = await new Promise((resolve) => {
-      execFile(py, ['-m', 'edge_tts', '--voice', voice, '--rate=' + rateStr, '--file', txtPath, '--write-media', outPath],
+      execFile(pyInfo.cmd, pyInfo.prefix.concat(['-m', 'edge_tts', '--voice', voice, '--rate=' + rateStr, '--file', txtPath, '--write-media', outPath]),
         { timeout: 60000, windowsHide: true }, (err) => resolve(!err && fs.existsSync(outPath)));
     });
-    if (!synthOk) return { ok: false, err: 'edge-tts 云端合成失败（请确认已安装 edge-tts：pip install -U edge-tts；并设置 EDGE_TTS_PYTHON 指向可用的 python3，可改用本地 GPT-SoVITS 引擎）' };
+    if (!synthOk) return { ok: false, err: 'edge-tts 云端合成失败（已找到 ' + pyInfo.cmd + ' 但合成出错，可改用本地 GPT-SoVITS 引擎）' };
     return { ok: true, url: pathToFileURL(outPath).href };
   } catch (err) {
     return { ok: false, err: String((err && err.message) || err) };
@@ -2099,124 +2174,370 @@ ipcMain.handle('models:fetchList', async (e, p) => {
 });
 // 打开配置文件（模型配置页右上角按钮）
 ipcMain.handle('models:openConfig', async () => { try { await shell.openPath(CONFIG_PATH); return { ok: true }; } catch (e) { return { ok: false, error: String((e && e.message) || e) }; } });
-// ---------- 弹幕自动回复（非官方：浏览器自动化抓直播间 DOM） ----------
+// ---------- 弹幕自动回复（非官方：浏览器自动化抓直播间） ----------
+// 采集器在 src/preload-danmaku.js：document-start 自动注入、只观察聊天容器、推模式上报、带健康检查与自愈。
+// 主进程这里只负责：窗口生命周期、把采集器/探针的消息转发给主界面、以及「阶段0」WS 探针。
 let danmakuWin = null;
-let dmTimer = null;
-const DM_INTERVAL = 600;
-
-// 注入到直播间页：MutationObserver 只抓聊天容器(.webcast-chatroom)里的消息 item(.webcast-chatroom___item)。
-// 结构：div.webcast-chatroom(唯一容器) > div[data-index=N](消息父节点带递增序号) > div.webcast-chatroom___item(消息)。
-// 用 item 父节点的 data-index 去重（只处理比已处理最大序号大的），不多抓任何多余内容。
-// 传输 {t: 文本, type: 'chat'(聊天) | 'event'(事件消息,含 bottom_message)}。
-const dmInject = `(function(){
-  if (window.__dmObsInjected) return 'already';
-  window.__dmNew = window.__dmNew || [];
-  var lastIdx = -1; // 已处理的最大 data-index，防止同一消息被多次抓取
-  function clean(t){ return (t||'').replace(/\\s+/g,' ').trim(); }
-  // 消息类型：item 含 bottom_message → 事件消息('event')，否则聊天('chat')
-  function msgType(el){
-    if (!el) return 'chat';
-    var c = String(el.className||'');
-    if (/bottom_message/.test(c)) return 'event';
-    if (el.querySelectorAll) {
-      try { var m = el.querySelectorAll('[class*="bottom_message"]'); if (m && m.length) return 'event'; } catch(e){}
-    }
-    return 'chat';
-  }
-  // 只抓一条消息 item：data-index 在它的父节点上，用它去重
-  function pushItem(item){
-    if (!item || item.nodeType !== 1) return;
-    var p = item.parentElement;
-    var idxAttr = p && p.getAttribute ? p.getAttribute('data-index') : null;
-    var idx = idxAttr != null ? parseInt(idxAttr, 10) : NaN;
-    if (idx != null && !isNaN(idx)) {
-      if (idx <= lastIdx) return; // 已处理过，跳过
-      lastIdx = idx;
-    }
-    const txt = clean(item.innerText);
-    if (!txt || txt.length > 120) return;   // 只挡空文本与超长文本
-    window.__dmNew.push({ t: txt, type: msgType(item) });
-  }
-  // 处理新增节点：只处理它内部(或自身)的聊天 item，不多抓
-  function scanNode(node){
-    if (!node || node.nodeType !== 1) return;
-    var items;
-    try { items = node.querySelectorAll ? node.querySelectorAll('.webcast-chatroom___item') : []; } catch(e){ items = []; }
-    if (items && items.length) {
-      for (var i = 0; i < items.length; i++) pushItem(items[i]);
-      return;
-    }
-    if (node.classList && node.classList.contains('webcast-chatroom___item')) { pushItem(node); return; }
-    // 兜底：如果新增节点带 data-index 且内部有 item，只处理 item 层
-  }
-  const obs = new MutationObserver(muts => {
-    for (const m of muts) {
-      for (const n of m.addedNodes) scanNode(n);
-      if (m.type === 'characterData' && m.target && m.target.parentElement) scanNode(m.target.parentElement);
-    }
-  });
-  try { obs.observe(document.body, {childList:true, subtree:true, characterData:true}); } catch(e){}
-  window.__dmObsInjected = true;
-  return 'started';
-})()`;
-const dmPull = `(()=>{ var a=(window.__dmNew||[]).slice(); window.__dmNew=[]; return a; })()`;
-
+let dmProbeTimer = null;
+let dmProbeState = null;
+let dmConnectSeq = 0; // 连接代次：异步解析短链期间用户点了「断开」就不要再开窗口
 
 let lastDmStatus = ''; // 去重：连续相同状态只发一次（避免 did-start-loading 重复刷屏）
-function sendDmStatus(msg) { if (msg === lastDmStatus) return; lastDmStatus = msg; if (libraryWin && !libraryWin.isDestroyed()) libraryWin.webContents.send('dm:status', msg); }
+function clipStr(s, n) { const t = String(s == null ? '' : s); return t.length > n ? t.slice(0, n) + '…' : t; }
+function sendDmStatus(msg) {
+  if (msg === lastDmStatus) return;
+  lastDmStatus = msg;
+  if (libraryWin && !libraryWin.isDestroyed()) libraryWin.webContents.send('dm:status', msg);
+}
+function toLibrary(channel, payload) {
+  if (libraryWin && !libraryWin.isDestroyed()) libraryWin.webContents.send(channel, payload);
+}
+// 明确的连接状态（驱动界面上「连接/断开」切换按钮）。
+// 不能用 connectDanmaku() 的返回来判断：它只代表「发起连接」，页面真正加载完成才算连上。
+// 三态：connected(页面加载完成) / disconnected(断开或窗口关闭) / failed(从未加载成功)
+function sendDmState(state) { toLibrary('dm:state', { state: state }); }
+// 确认事件确实来自当前弹幕窗口（避免别的窗口伪造）
+function isDanmakuSender(e) {
+  return !!(danmakuWin && !danmakuWin.isDestroyed() && e.sender === danmakuWin.webContents);
+}
 
-function connectDanmaku(url) {
+// ---------- 统一转发 + 跨源去重 ----------
+// 同一条弹幕会同时从「DOM 采集器」和「WS 解码」到达，在 danmaku-dedupe 里合流：
+// WS 优先（结构化字段更全），WS 断流 8 秒后 DOM 自动接管。
+const dmDedupe = require('./danmaku-dedupe');
+dmDedupe.init(toLibrary);
+
+// 采集器（preload，推模式）→ 主界面渲染进程
+ipcMain.on('dm:message', (e, msg) => {
+  if (!isDanmakuSender(e)) return;
+  dmDedupe.forward(msg, 'dom');
+});
+ipcMain.on('dm:health', (e, h) => {
+  if (!isDanmakuSender(e)) return;
+  console.log('[dm-health] ' + JSON.stringify(h || {}));
+  toLibrary('dm:health', h || {});
+});
+
+// ---------- CDP 旁观 WebSocket 推送帧 ----------
+// 旁听页面自己已建立的 WSS：签名 / a_bogus / 心跳 / ACK 全由页面 JS 完成，这里只读帧、不解码发送、不发业务请求。
+// 二进制帧（opcode!=1）的 payloadData 是 base64 → PushFrame → (gzip) → Response.messagesList → protobuf 解码。
+// 解出的结构化事件与 DOM 采集器在 danmaku-dedupe 处合流去重；解码失败静默回退 DOM，绝不影响现有功能。
+// 可用 config/client-config.json 的 danmaku.probe=false 关闭整个旁听（含解码）。
+function probeEnabled() {
+  try {
+    const d = clientConfig && clientConfig.danmaku;
+    return !d || d.probe !== false;
+  } catch (e) { return true; }
+}
+function pushSocketUrl(u) { return /webcast|\/im\/(push|fetch)/i.test(String(u || '')); }
+
+// base64（CDP 二进制帧）→ Message[]。两种解码尝试，失败返回空数组，绝不抛。
+function decodeFramePayload(data) {
+  const s = String(data || '');
+  if (!s) return [];
+  const candidates = [];
+  try { candidates.push(Buffer.from(s, 'base64')); } catch (e) {}
+  try { candidates.push(Buffer.from(s, 'binary')); } catch (e) {}
+  for (const b of candidates) {
+    if (!b.length) continue;
+    try {
+      const msgs = dmProto.decodePushFrame(b);
+      if (msgs.length) return msgs;
+    } catch (e) {}
+  }
+  return [];
+}
+
+// 帧样本落盘：把前若干帧的真实结构写到 config/dm-frame-sample.txt，
+// 用来反推抖音当前的真实封装（本地无需抓包，直接看文件）。
+const dmFrameSamples = [];
+let dmFrameDumped = false;
+function dumpFrameSample(data) {
+  if (dmFrameSamples.length >= 6) return;
+  try {
+    const b = Buffer.from(String(data || ''), 'base64');
+    if (!b.length) return;
+    const info = dmProto.analyzeFrame(b);
+    // 额外留一段原始 hex（前 96 字节）便于人工比对
+    info.rawHex96 = b.subarray(0, 96).toString('hex');
+    dmFrameSamples.push(info);
+    if (dmFrameSamples.length >= 6 && !dmFrameDumped) {
+      dmFrameDumped = true;
+      const out = {
+        at: new Date().toISOString(),
+        note: '抖音 WS 推送帧样本（前6帧）。analyzFrame 各字段含义见 danmaku-proto.js',
+        samples: dmFrameSamples
+      };
+      const file = path.join(ROOT, 'config', 'dm-frame-sample.json');
+      try { fs.writeFileSync(file, JSON.stringify(out, null, 2), 'utf8'); } catch (e) {}
+      console.log('[dm-frame-sample] 已写入 ' + file);
+      console.log('[dm-frame-sample] ' + JSON.stringify(out.samples[0]));
+    }
+  } catch (e) {}
+}
+
+// 未解帧样本：抓到「有推送帧但拆不出任何消息」时单独落盘，用来确认是心跳/控制帧还是格式不识别
+const dmUnparsedSamples = [];
+let dmUnparsedDumped = false;
+function dumpUnparsedFrame(data) {
+  if (dmUnparsedSamples.length >= 8) return;
+  try {
+    const b = Buffer.from(String(data || ''), 'base64');
+    if (!b.length) return;
+    const info = dmProto.analyzeFrame(b);
+    info.rawHex96 = b.subarray(0, 96).toString('hex');
+    dmUnparsedSamples.push(info);
+    if (dmUnparsedSamples.length >= 8 && !dmUnparsedDumped) {
+      dmUnparsedDumped = true;
+      const out = { at: new Date().toISOString(), note: '未解帧样本（前8个）。label=control/heartbeat 表示是心跳/ACK 控制帧，非弹幕', samples: dmUnparsedSamples };
+      try { fs.writeFileSync(path.join(ROOT, 'config', 'dm-frame-unparsed.json'), JSON.stringify(out, null, 2), 'utf8'); } catch (e) {}
+      console.log('[dm-unparsed] 已写入 config/dm-frame-unparsed.json；样本0=' + JSON.stringify(dmUnparsedSamples[0]));
+    }
+  } catch (e) {}
+}
+
+function startDanmakuProbe(win) {
+  stopDanmakuProbe();
+  if (!probeEnabled()) {
+    sendDmStatus('WS 探针已关闭（client-config.json → danmaku.probe=false）');
+    return Promise.resolve();
+  }
+  const st = {
+    attached: false, created: 0, handshake: 0, pushSockets: 0,
+    frames: 0, binaryFrames: 0, pushFrames: 0, bytes: 0,
+    decoded: 0, unparsed: 0, errors: 0, dropped: 0,
+    byKind: { chat: 0, gift: 0, like: 0, enter: 0, follow: 0 },
+    error: ''
+  };
+  dmProbeState = st;
+  const dbg = win.webContents.debugger;
+  const pushIds = new Set();
+  let firstPushReported = false;
+  let loggedErrors = 0;
+
+  const emit = (tag) => {
+    st.dropped = dmDedupe.droppedCount();
+    const payload = Object.assign({}, st, { byKind: Object.assign({}, st.byKind), ts: Date.now(), tag: tag || '' });
+    console.log('[dm-probe] ' + JSON.stringify(payload));
+    toLibrary('dm:probe', payload);
+  };
+
+  const setup = (async () => {
+    try {
+      if (!dbg.isAttached()) await dbg.attach('1.3');
+      await dbg.sendCommand('Network.enable'); // 必须，否则不产生 WebSocket 事件
+      st.attached = true;
+    } catch (err) {
+      st.error = String((err && err.message) || err);
+      console.log('[dm-probe] attach/enable 失败：' + st.error);
+    }
+    dbg.on('detach', () => { st.attached = false; });
+    dbg.on('message', (_e, method, p) => {
+      const q = p || {};
+      if (method === 'Network.webSocketCreated') {
+        st.created++;
+        if (pushSocketUrl(q.url)) { pushIds.add(q.requestId); st.pushSockets = pushIds.size; }
+      } else if (method === 'Network.webSocketHandshakeResponseReceived') {
+        st.handshake++;
+      } else if (method === 'Network.webSocketFrameReceived') {
+        st.frames++;
+        const r = q.response || {};
+        if (r.opcode !== 1) st.binaryFrames++; // opcode!=1 → payloadData 是 base64 二进制
+        st.bytes += String(r.payloadData || '').length;
+        if (pushIds.has(q.requestId)) {
+          st.pushFrames++;
+          if (!firstPushReported) { firstPushReported = true; emit('first-push-frame'); }
+          // 只解二进制帧；文本帧（心跳/ack 等）跳过
+          if (r.opcode !== 1) {
+            dumpFrameSample(r.payloadData); // 前 6 帧落盘，用于反推真实封装
+            try {
+              const msgs = decodeFramePayload(r.payloadData);
+              if (!msgs.length) { st.unparsed++; dumpUnparsedFrame(r.payloadData); } // 有推送帧但拆不出 Message
+              for (const m of msgs) {
+                const ev = dmProto.decodeMessage(m);
+                if (!ev) continue;
+                st.decoded++;
+                dmDedupe.markWsActive();
+                if (Object.prototype.hasOwnProperty.call(st.byKind, ev.kind)) st.byKind[ev.kind]++;
+                dmDedupe.forward(ev, 'ws');
+              }
+            } catch (err) {
+              st.errors++;
+              if (++loggedErrors <= 5) console.log('[dm-decode] 帧解码异常：' + String((err && err.message) || err));
+            }
+          }
+        }
+      } else if (method === 'Network.webSocketClosed') {
+        pushIds.delete(q.requestId);
+        st.pushSockets = pushIds.size;
+      }
+    });
+    emit('start');
+    dmProbeTimer = setInterval(() => emit('tick'), 2500);
+  })();
+
+  // 不让探针卡住页面加载：最多等 2.5 秒
+  return Promise.race([
+    setup.catch(() => {}),
+    new Promise(r => setTimeout(r, 2500))
+  ]);
+}
+function stopDanmakuProbe() {
+  if (dmProbeTimer) { clearInterval(dmProbeTimer); dmProbeTimer = null; }
+  dmProbeState = null;
+}
+
+// ---------- 弹幕源窗口 ----------
+// 抖音短链（v.douyin.com/xxx）的落地页常带 CSP，JS 跳转会被 Chromium 判为
+// navigate-to 违规 → ERR_BLOCKED_BY_CSP(-30)。直接用落地页跳转后的真实直播间地址可绕开。
+// 注意：Node fetch 不带浏览器登录 Cookie，所以只接受解析到 live.douyin.com 的结果；
+// 其余情况一律沿用原地址，交给带 persist:douyin Cookie 的窗口自己跳转。
+const DM_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+function isShortLink(u) {
+  try {
+    const h = new URL(u).hostname.toLowerCase();
+    return h === 'v.douyin.com' || h === 'www.v.douyin.com' || h === 'vmobile.douyin.com';
+  } catch (e) { return false; }
+}
+async function resolveShortLink(u) {
+  try {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 6000);
+    let r;
+    try {
+      r = await fetch(u, { redirect: 'follow', signal: ac.signal,
+        headers: { 'User-Agent': DM_UA, 'Accept': 'text/html,*/*' } });
+    } finally { clearTimeout(timer); }
+    const final = String(r && r.url || '');
+    if (/^https?:\/\/(?:www\.)?live\.douyin\.com\//i.test(final) && final !== u) {
+      console.log('[dm-resolve] ' + u + ' -> ' + final);
+      return final;
+    }
+    console.log('[dm-resolve] 未解析到直播间地址（' + (final || '无') + '），沿用原地址由窗口自行跳转');
+  } catch (e) {
+    console.log('[dm-resolve] 短链解析失败，沿用原地址：' + String((e && e.message) || e));
+  }
+  return u;
+}
+
+async function connectDanmaku(url) {
+  const seq = ++dmConnectSeq;
   disconnectDanmaku();
+  dmDedupe.reset(); // 重新连接时清空跨源去重池与源状态
   if (!/^https?:\/\//.test(url)) return;
   sendDmStatus('正在打开直播间页面…');
-  danmakuWin = new BrowserWindow({
+
+  // 短链先解析成真实直播间地址，避开落地页 CSP
+  let target = url;
+  if (isShortLink(url)) {
+    sendDmStatus('正在解析直播间短链（避免跳转页 CSP 拦截）…');
+    target = await resolveShortLink(url);
+  }
+  if (seq !== dmConnectSeq) return; // 解析期间已断开，别再开窗口
+
+  const win = new BrowserWindow({
     width: 1080, height: 760, show: false,
     backgroundColor: '#0f1020', title: '弹幕源（直播间）',
-    webPreferences: { contextIsolation: true, nodeIntegration: false, partition: 'persist:douyin' }
+    webPreferences: {
+      preload: path.join(DATA_DIR, 'preload-danmaku.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      partition: 'persist:douyin',
+      backgroundThrottling: false // 隐藏窗口默认会被节流，聊天虚拟列表可能不渲染 → 必开
+    }
   });
-  danmakuWin.setMenuBarVisibility(false);
-  danmakuWin.webContents.setAudioMuted(true); // 连接直播间后直接静音，防止后台弹幕源窗口出声干扰
-  let loadFailed = false;
-  danmakuWin.webContents.on('did-start-loading', () => sendDmStatus('正在加载直播间页面…'));
-  danmakuWin.webContents.on('did-fail-load', (_e, code, desc) => { loadFailed = true; sendDmStatus('页面加载失败：' + desc + '（code ' + code + '）'); });
-  danmakuWin.webContents.on('did-finish-load', async () => {
-    if (loadFailed) { sendDmStatus('已停止：直播间页面加载失败'); return; }
-    sendDmStatus('页面加载完成，注入弹幕监听…');
-    danmakuWin.webContents.setAudioMuted(true); // 页面加载完成后再次确保静音（防止页面重置音频状态）
-    const r = await danmakuWin.webContents.executeJavaScript(dmInject, true).catch(() => 'error');
-    sendDmStatus('弹幕监听已注入（' + r + '），开始实时抓取…');
-    startDanmaku();
-  });
-  // 加载超时兜底：超过 20 秒仍无弹幕数据且页面未完成，提示可能未进入直播间
-  const loadTimeout = setTimeout(() => { sendDmStatus('提示：页面加载较慢或未进入直播间，请确认链接是否有效'); }, 20000);
-  danmakuWin.webContents.once('did-finish-load', () => clearTimeout(loadTimeout));
-  danmakuWin.loadURL(url);
-  danmakuWin.on('closed', () => { danmakuWin = null; stopDanmaku(); });
-}
-function startDanmaku() {
-  stopDanmaku();
-  dmTimer = setInterval(async () => {
-    if (!danmakuWin || danmakuWin.isDestroyed()) return;
-    try {
-      const arr = await danmakuWin.webContents.executeJavaScript(dmPull, true);
-      if (arr && arr.length) {
-        const seen = new Set();
-        const uniq = arr.filter(x => { const k = (x && x.t) || ''; if (!k || seen.has(k)) return false; seen.add(k); return true; }); // 按文本兜底去重
-        if (uniq.length && libraryWin && !libraryWin.isDestroyed()) {
-          uniq.forEach(line => libraryWin.webContents.send('dm:message', line));
-        }
-      }
-    } catch (e) {}
-  }, DM_INTERVAL);
-}
-function stopDanmaku() { if (dmTimer) { clearInterval(dmTimer); dmTimer = null; } }
-function disconnectDanmaku() { stopDanmaku(); if (danmakuWin && !danmakuWin.isDestroyed()) danmakuWin.destroy(); danmakuWin = null; }
+  danmakuWin = win;
+  win.setMenuBarVisibility(false);
+  const wc = win.webContents;
+  wc.setAudioMuted(true);
+  let everLoaded = false;
+  let finalUrl = target;
 
-ipcMain.handle('dm:connect', (e, url) => { connectDanmaku(String(url || '').trim()); return true; });
-ipcMain.handle('dm:showLogin', () => { if (danmakuWin && !danmakuWin.isDestroyed()) { danmakuWin.show(); danmakuWin.focus(); } return true; });
-ipcMain.handle('dm:hide', () => { if (danmakuWin && !danmakuWin.isDestroyed()) danmakuWin.hide(); return true; });
-ipcMain.handle('dm:disconnect', () => { disconnectDanmaku(); return true; });
+  wc.on('did-start-loading', () => sendDmStatus('正在加载直播间页面…'));
+  wc.on('did-navigate', (_e, navUrl) => { if (navUrl && navUrl !== 'about:blank') finalUrl = navUrl; });
+  wc.on('did-redirect-navigation', (_e, redirectUrl) => { if (redirectUrl) console.log('[dm-redirect] ' + redirectUrl); });
+  wc.on('did-fail-load', (_e, code, desc, validatedUrl, isMainFrame) => {
+    if (code === -3) return;            // ERR_ABORTED：被后续导航取消，重定向链里很常见
+    if (isMainFrame === false) return;  // 子资源 / iframe 失败不影响聊天页
+    console.log('[dm-fail-load] code=' + code + ' ' + clipStr(desc, 200) + ' url=' + clipStr(validatedUrl, 200));
+    // 已经成功加载过 → 只是后续跳转被拦，页面还在、采集继续，绝不把状态钉死成「已停止」
+    if (everLoaded) {
+      sendDmStatus('提示：后续跳转被拦截（' + clipStr(desc, 120) + '，code ' + code + '）；当前页面仍在，采集继续。建议改用 live.douyin.com 直链');
+    } else {
+      sendDmState('failed'); // 从未加载成功 → 按钮恢复「连接直播间」，可重试
+      sendDmStatus('页面加载失败：' + clipStr(desc, 120) + '（code ' + code + '）' +
+        (isShortLink(url) ? '；短链跳转易被 CSP 拦截，建议改用 live.douyin.com 直链' : ''));
+    }
+  });
+  wc.on('did-finish-load', () => {
+    everLoaded = true;
+    wc.setAudioMuted(true);
+    sendDmState('connected'); // 页面真正加载完成 → 按钮变「断开」
+    // 重定向后的 URL 常带一大串参数，只显示前 100 字，完整地址写进控制台日志
+    console.log('[dm-loaded] ' + clipStr(finalUrl, 300));
+    sendDmStatus('页面加载完成' + (finalUrl !== url ? '（' + clipStr(finalUrl, 100) + '）' : '') + '，弹幕采集器已随文档启动（推模式）…');
+  });
+  const loadTimeout = setTimeout(() => {
+    if (!everLoaded) sendDmStatus('提示：页面加载较慢或未进入直播间，请确认链接是否有效 / 是否已扫码登录');
+  }, 20000);
+  wc.once('did-finish-load', () => clearTimeout(loadTimeout));
+  // 关键：重连时旧窗口的 closed 是「异步」派发的，可能晚于新窗口创建。
+  // 若回调无条件把全局 danmakuWin 置 null，会把刚建好的新窗口引用一起清掉 →
+  // isDanmakuSender() 永远 false，所有弹幕消息被丢弃（表现为零弹幕）。
+  // 因此只在「当前全局仍是自己」时才清理。
+  win.on('closed', () => {
+    if (danmakuWin === win) {
+      danmakuWin = null;
+      stopDanmakuProbe();
+      sendDmState('disconnected');
+    }
+  });
+  // 窗口被系统/页面自行显示或隐藏时，同步给界面的切换按钮
+  win.on('show', () => toLibrary('dm:loginVisible', { visible: true }));
+  win.on('hide', () => toLibrary('dm:loginVisible', { visible: false }));
+
+  // 先挂探针（Network.enable 要在导航前生效），再加载页面
+  startDanmakuProbe(win).then(() => {
+    if (danmakuWin === win && !win.isDestroyed()) wc.loadURL(target);
+  });
+}
+function disconnectDanmaku() {
+  stopDanmakuProbe();
+  if (danmakuWin && !danmakuWin.isDestroyed()) {
+    try {
+      const dbg = danmakuWin.webContents.debugger;
+      if (dbg.isAttached()) dbg.detach();
+    } catch (e) {}
+    danmakuWin.destroy();
+  }
+  danmakuWin = null;
+  lastDmStatus = '';
+  sendDmState('disconnected'); // 断开 → 按钮恢复「连接直播间」
+}
+
+ipcMain.handle('dm:connect', async (e, url) => { await connectDanmaku(String(url || '').trim()); return true; });
+// 登录窗口显隐合并为一个切换按钮：一次调用完成切换并返回最新可见状态
+ipcMain.handle('dm:loginToggle', () => {
+  if (!danmakuWin || danmakuWin.isDestroyed()) return { exists: false, visible: false };
+  try {
+    if (danmakuWin.isVisible()) { danmakuWin.hide(); }
+    else { danmakuWin.show(); danmakuWin.focus(); }
+  } catch (e) {}
+  const visible = !!(danmakuWin && !danmakuWin.isDestroyed() && danmakuWin.isVisible());
+  toLibrary('dm:loginVisible', { visible });
+  return { exists: true, visible };
+});
+ipcMain.handle('dm:disconnect', () => { dmConnectSeq++; disconnectDanmaku(); return true; });
 ipcMain.handle('dm:filterRule', () => { createFilterRule(); return true; });
+// 自检：注入一条假弹幕走完整链路（去重 → IPC → 渲染列表），用来二分「采集不到」还是「下游不显示」
+ipcMain.handle('dm:test', () => {
+  const msg = {
+    t: '测试观众：这是一条自检弹幕', type: 'chat', kind: 'chat',
+    msgId: 'test' + Date.now(), user: '测试观众', text: '这是一条自检弹幕', src: 'test'
+  };
+  return { ok: dmDedupe.forward(msg, 'test') };
+});
+
 ipcMain.handle('deviceGuide:open', () => { createDeviceGuide(); return true; });
 ipcMain.handle('deviceDir:open', async () => {
   const dir = path.join(DATA_DIR, 'software');

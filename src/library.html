@@ -422,12 +422,10 @@
       <div class="row field">
         <span class="label" style="flex:none;margin:0;">直播间链接</span>
         <input type="text" id="dmUrl" style="flex:1;" placeholder="https://live.douyin.com/ 或直播间网页地址">
-        <button class="dmb dmb-g" id="dmConnect">🔗 连接</button>
-        <button class="dmb dmb-r" id="dmDisconnect">断开</button>
+        <button class="dmb dmb-g" id="dmConnect">🔗 连接直播间</button>
       </div>
       <div class="row field" style="gap:12px;align-items:center;">
-        <button class="dmb dmb-b" id="dmShowLogin">👁 显示登录窗口</button>
-        <button class="dmb dmb-b" id="dmHide">隐藏</button>
+        <button class="dmb dmb-b" id="dmLoginToggle">👁 显示登录窗口</button>
         <label class="switch"><input type="checkbox" id="dmAutoRead"> 自动朗读新弹幕</label>
         <button class="dmb dmb-b" id="dmFilterRule" style="padding:5px 10px;font-size:12px;">📋 过滤规则</button>
         <span style="font-size:12px;color:#9aa0c8;">音色同 AI 主播</span>
@@ -476,9 +474,13 @@
       </div>
       <div class="row field" style="gap:12px;align-items:center;margin-top:12px;">
         <span class="label" style="flex:none;margin:0;color:#22d39a;">连接进度</span>
-        <div id="dmLog" style="flex:1;max-height:96px;overflow-y:auto;background:#0f1020;border:1px solid #2a2d52;border-radius:10px;padding:10px;font-size:12px;color:#9aa0c8;"></div>
+        <div id="dmLog" style="flex:1;min-width:0;max-height:96px;overflow-y:auto;overflow-wrap:anywhere;word-break:break-all;background:#0f1020;border:1px solid #2a2d52;border-radius:10px;padding:10px;font-size:12px;color:#9aa0c8;"></div>
       </div>
-      <div class="state" id="dmState">未连接</div>
+      <div class="state" id="dmState" style="overflow-wrap:anywhere;word-break:break-all;">未连接</div>
+      <div style="display:flex;align-items:flex-start;gap:8px;margin-top:6px;">
+        <div id="dmDiag" style="flex:1;min-width:0;font-size:11px;color:#6b7a99;line-height:1.7;word-break:break-all;">采集诊断：等待连接…</div>
+        <button id="dmSelfTest" class="dmb dmb-b" style="padding:4px 10px;font-size:11px;white-space:nowrap;flex:none;">🧪 自检</button>
+      </div>
     </div>
     <div class="col" style="flex:1;min-width:0;">
       <h2>🤖 AI读弹幕答疑 <span class="chip">DeepSeek</span></h2>
@@ -1589,6 +1591,9 @@
   // ---- 弹幕自动回复 ----
   let dmList = [];
   const dmSeenSet = new Map(); // 全局弹幕去重池(key=user+text -> expireAt)：只对短时间内的重复去重，避免长期误杀
+  const dmLastBySrc = new Map(); // 跨源去重：内容 key -> {src, t}，只挡 DOM/WS 切换瞬间的重复
+  const dmStats = { raw: 0, shown: 0 }; // 诊断：收到多少条原始 IPC / 实际显示多少条
+  const dmDiag = { health: null, probe: null }; // 提前声明：IPC 回调可能在脚本尾部之前触发
   const DM_TTL = 5 * 1000; // 5 秒：配合 user|text 去重。不同用户发同样内容→都显示；同一用户5秒内发完全相同的→去重；超5秒→显示
   function dmSeenCheck(dkey){
     const now = Date.now();
@@ -1635,10 +1640,18 @@
     while (box.children.length > 500) box.lastElementChild.remove(); // 与 dmList 的 500 上限同步
     if (document.getElementById('dmAutoScroll').checked) box.scrollTop = 0;
   }
+  // 连接进度：长链接/长状态只截断显示，完整内容放 title（鼠标悬停可看），避免撑变形
+  function dmShort(s, n){ const t = String(s == null ? '' : s); return t.length > n ? t.slice(0, n) + '…' : t; }
   function dmLog(msg){
     const box = document.getElementById('dmLog');
     const t = new Date().toLocaleTimeString('zh-CN',{hour12:false});
-    box.innerHTML = '<div style="color:#22d39a;">['+t+'] '+esc(msg)+'</div>' + box.innerHTML;
+    const full = String(msg == null ? '' : msg);
+    const div = document.createElement('div');
+    div.style.color = '#22d39a';
+    div.style.overflowWrap = 'anywhere';
+    div.textContent = '[' + t + '] ' + dmShort(full, 160);
+    if (full.length > 160) div.title = full; // 悬停看完整内容（含完整长链接）
+    box.insertBefore(div, box.firstChild);
     while (box.childNodes.length > 12) box.lastChild.remove();
   }
   // ---- 弹幕语音互动 ----
@@ -1699,9 +1712,11 @@
     if (st.recent.length > 5) st.recent.shift();
     return line;
   }
-  function dmInteract(line){
+  function dmInteract(line, extra){
     const ev = dmClassify(line);
     if (!ev) return;
+    // WS 解码给了真实礼物名（含数量），优先用它，不再从「送出xxx」文本里抠
+    if (extra && extra.gift && extra.gift.name) ev.gift = extra.gift.name;
     const el = document.getElementById('dmEvt' + ev.type);
     if (!el || !el.checked) return; // 该事件未勾选
     const cool = (Math.max(0, +document.getElementById('dmCool').value || 0)) * 60000;
@@ -1928,64 +1943,155 @@
   // ================= 弹幕统一事件管道（方案A：只语音朗读，不发弹幕到直播间） =================
   // 现有 addDanmaku(line) 只做两件事：把原始行适配成统一事件，再交给四段式管道。
   // 去重→展示→互动→朗读 四个分支互相独立，任一失败不影响其他。
-  let dmEvtSeq = 0; // eventId 辅助序号（无真实 msgId，用内容+序号兜底防误杀）
-  // 适配器：原始消息 m = {t: 文本, type: 'chat'|'event'(DOM判断)} → 单对象
+  let dmEvtSeq = 0; // 兜底辅助序号（采集器没给 msgId 时才用）
+  // 适配器：原始消息 m = {t, type, msgId?, user?, text?, kind?, gift?} → 单对象
+  // 三种来源都能走：旧格式（仅 t/type）→ 正则解析；DOM 新采集器 → 带 msgId/已拆字段；
+  // WS protobuf 解码 → 带 kind 精确类型 + 真实礼物名，无需再靠正则猜。
+  const KIND_TO_TYPE = { chat: 'chat', gift: 'gift', like: 'like', enter: 'welcome', follow: 'follow' };
   function adaptDmLine(m){
     if (!m || !m.t || !m.t.trim()) return null;
     const line = m.t;
     const d = { t: new Date().toLocaleTimeString('zh-CN',{hour12:false}), ...dmParse(line) };
-    // type：聊天(DOM不含 bottom_message)固定 'chat'；事件消息(DOM含 bottom_message)按内容细分 welcome/gift/like。
-    d.type = (m.type === 'event')
-      ? ((dmClassify(line) || {}).type || 'welcome')
-      : 'chat';
-    const eventId = (d.user || '') + '|' + (d.text || '') + '|' + (++dmEvtSeq);
-    return { eventId, type: d.type, d, raw: line };
+    if (m.user) d.user = m.user;
+    if (m.text) d.text = m.text;
+    // WS 解码给了精确 kind 就直接映射（不再用 dmClassify 猜）；DOM/旧格式沿用原逻辑
+    d.type = m.kind
+      ? (KIND_TO_TYPE[m.kind] || 'welcome')
+      : ((m.type === 'event') ? ((dmClassify(line) || {}).type || 'welcome') : 'chat');
+    const eventId = m.msgId || ((d.user || '') + '|' + (d.text || '') + '|' + (++dmEvtSeq));
+    // 透传结构化礼物信息，供互动模板用真实礼物名（而不是从文本里抠）
+    return { eventId, type: d.type, d, raw: line, msgId: m.msgId || '', gift: m.gift || null, src: m.src || (m.msgId && String(m.msgId).indexOf('ws') === 0 ? 'ws' : 'dom') };
   }
   // 管道：dispatch(ev) → 1去重 → 2展示 → 3互动 → 4朗读
   function dispatchDmEvent(ev){
-    // 1) 去重：key=用户名|正文。注入层已保证只抓完整条目（用户名稳定），
-    //    · 不同用户发同样内容 → key 不同 → 都显示
-    //    · 同一用户 5 秒内发完全相同 → 去重
-    //    · 同一用户间隔超 5 秒 → 显示
-    const dkey = ((ev.d.user || '') + '|' + (ev.d.text || '')).replace(/\s+/g, ' ').trim();
+    // 1) 跨源兜底去重：同一内容若刚由「另一个来源」发过（DOM→WS 切换瞬间），只保留一条。
+    //    仅跨源、仅 1.5 秒窗口 —— 同源连发「666」不受影响。
+    const ckey = ((ev.d.user || '') + '|' + (ev.d.text || '')).replace(/\s+/g, ' ').trim();
+    if (ckey) {
+      const last = dmLastBySrc.get(ckey);
+      const nowSrc = Date.now();
+      if (last && last.src !== ev.src && nowSrc - last.t < 1500) { dmLog('[去重] 跨源重复：' + ev.raw); return; }
+      dmLastBySrc.set(ckey, { src: ev.src, t: nowSrc });
+      if (dmLastBySrc.size > 500) for (const [k, v] of dmLastBySrc) if (nowSrc - v.t > 1500) dmLastBySrc.delete(k);
+    }
+    // 2) 有真实 msgId 就按「每条消息」精确去重；否则退回旧的「用户名|正文」+ 5 秒 TTL 兜底
+    const dkey = ev.msgId
+      ? ('id:' + ev.msgId)
+      : ckey;
     if (dkey && dmSeenCheck(dkey)) { dmLog('[去重] 跳过重复弹幕：' + ev.raw); return; }
     // 2) 展示分支：受"过滤事件消息"开关，选中则 welcome/gift/like 不进列表/不读原文/不走AI
     const filterEvent = document.getElementById('dmIFilter').checked;
     const showInList = !(filterEvent && ev.type !== 'chat');
     // 3) 互动分支：事件消息且开启"弹幕语音互动"→ 按模板朗读（不受列表过滤影响）
-    if (dmInteractOn && ev.type !== 'chat') dmInteract(ev.raw);
+    //    每个分支独立 try/catch：任一分支异常都不能拖垮「弹幕必须显示」这条主线
+    if (dmInteractOn && ev.type !== 'chat') {
+      try { dmInteract(ev.raw, ev); } catch (err) { dmLog('⚠ 互动异常：' + String((err && err.message) || err)); }
+    }
     // 4) 朗读分支：chat 且开启"自动读弹幕"→ 读原文
-    if (showInList && dmAutoReadOn && ev.type === 'chat') speakDanmaku(ev.raw);
+    if (showInList && dmAutoReadOn && ev.type === 'chat') {
+      try { speakDanmaku(ev.raw); } catch (err) { dmLog('⚠ 朗读异常：' + String((err && err.message) || err)); }
+    }
     // 展示落库（过滤事件消息时跳过的就不进列表）
     if (showInList) {
-      aiTrigger(ev); // AI读弹幕答疑（提问用聊天内容，去掉用户名）
+      try { aiTrigger(ev); } catch (err) { dmLog('⚠ AI答疑异常：' + String((err && err.message) || err)); }
       dmList.unshift(ev.d);   // 新消息加头部 → 新在最上，向下滚看旧
       if (dmList.length > 500) dmList.pop();
       dmAppendItem(ev.d);     // 增量渲染：只加这一条，不整块重绘
+      dmStats.shown++;
+      renderDmDiag();
     }
   }
   function addDanmaku(line){
     const ev = adaptDmLine(line);
     if (ev) dispatchDmEvent(ev);
   }
+  // 单按钮切换：未连接=「连接直播间」→ 连上=「断开」→ 点断开恢复原样。
+  // 状态由主进程的 dm:state 事件驱动（页面真正 did-finish-load 才算连上），
+  // 不能靠 connectDanmaku() 的返回：它只代表「发起连接」。
+  let dmConnState = 'idle'; // 'idle' | 'connecting' | 'connected'
+  let dmConnTimer = null;
+  function setDmConnState(s) {
+    dmConnState = s;
+    const btn = document.getElementById('dmConnect');
+    if (!btn) return;
+    if (dmConnTimer) { clearTimeout(dmConnTimer); dmConnTimer = null; }
+    btn.disabled = false;
+    btn.classList.remove('dmb-g', 'dmb-r', 'dmb-b');
+    if (s === 'connecting') {
+      btn.textContent = '正在连接…';
+      btn.classList.add('dmb-b');
+      btn.disabled = true;
+      // 兜底：25 秒仍没收到「已连上」就恢复可重连，避免按钮卡死
+      dmConnTimer = setTimeout(() => {
+        if (dmConnState !== 'connecting') return;
+        setDmConnState('idle');
+        dmLog('⚠ 连接超时，请检查链接 / 是否已扫码登录，然后重试');
+      }, 25000);
+    } else if (s === 'connected') {
+      btn.textContent = '⏹ 断开';
+      btn.classList.add('dmb-r');
+    } else {
+      btn.textContent = '🔗 连接直播间';
+      btn.classList.add('dmb-g');
+    }
+  }
+  if (window.api.onDanmakuState) window.api.onDanmakuState(s => {
+    const st = s && s.state;
+    if (st === 'connected') { setDmConnState('connected'); setLoginBtn(false); dmLog('✅ 已连接直播间'); }
+    else if (st === 'failed') { setDmConnState('idle'); setLoginBtn(false); }
+    else if (st === 'disconnected' && dmConnState !== 'connecting') {
+      // connecting 期间的 disconnected 是主进程「替换旧窗口」时发的，忽略，避免按钮闪回可重复点
+      setDmConnState('idle');
+      setLoginBtn(false);
+    }
+  });
   document.getElementById('dmConnect').onclick = async () => {
+    // 已连接 → 点它就是断开
+    if (dmConnState === 'connected') {
+      try { await window.api.disconnectDanmaku(); } catch (e) {}
+      setState('dmState', '已断开');
+      dmLog('已断开连接');
+      dmDiag.health = null; dmDiag.probe = null; renderDmDiag();
+      setDmConnState('idle');
+      return;
+    }
+    if (dmConnState === 'connecting') return; // 防重复点击
     const url = document.getElementById('dmUrl').value.trim();
     if (!url) { setState('dmState', '请输入直播间链接', true); return; }
-    dmList = []; dmSeenSet.clear(); renderDanmaku(); // 重新连接时清空弹幕与去重池
-    const btn = document.getElementById('dmConnect');
-    btn.disabled = true; btn.textContent = '正在连接中...';
+    dmList = []; dmSeenSet.clear(); dmLastBySrc.clear(); renderDanmaku(); // 重新连接时清空弹幕与去重池
+    dmStats.raw = 0; dmStats.shown = 0;
+    dmDiag.health = null; dmDiag.probe = null; renderDmDiag(); // 清掉上一次的诊断残留
+    setDmConnState('connecting');
     dmLog('发起连接：' + url);
     setState('dmState', '正在连接...');
     try {
       await window.api.connectDanmaku(url);
-    } finally {
-      btn.disabled = false; btn.textContent = '连接直播间';
+      // 这里不翻按钮，等主进程 dm:state 通知真正连上
+    } catch (err) {
+      setDmConnState('idle');
+      dmLog('❌ 连接调用失败：' + String((err && err.message) || err));
     }
   };
-  document.getElementById('dmDisconnect').onclick = async () => { await window.api.disconnectDanmaku(); setState('dmState', '已断开'); dmLog('已断开连接'); };
-  document.getElementById('dmShowLogin').onclick = () => window.api.showLoginWin();
-  document.getElementById('dmHide').onclick = () => window.api.hideLoginWin();
-  document.getElementById('dmClear').onclick = () => { dmList = []; dmSeenSet.clear(); renderDanmaku(); };
+  // 登录窗口显隐：单按钮切换（显示 ↔ 隐藏），状态由主进程 dm:loginVisible 同步
+  function setLoginBtn(visible) {
+    const b = document.getElementById('dmLoginToggle');
+    if (!b) return;
+    b.textContent = visible ? '🙈 隐藏登录窗口' : '👁 显示登录窗口';
+    b.classList.toggle('dmb-r', !!visible);
+    b.classList.toggle('dmb-b', !visible);
+  }
+  document.getElementById('dmLoginToggle').onclick = async () => {
+    try {
+      const r = await window.api.toggleLoginWin();
+      if (!r || !r.exists) { dmLog('⚠ 还没有弹幕窗口，请先连接直播间'); setLoginBtn(false); return; }
+      setLoginBtn(r.visible);
+      dmLog(r.visible ? '已显示登录窗口，扫码登录后请点按钮隐藏' : '已隐藏登录窗口');
+    } catch (err) {
+      dmLog('❌ 切换登录窗口失败：' + String((err && err.message) || err));
+    }
+  };
+  if (window.api.onDanmakuLoginVisible) window.api.onDanmakuLoginVisible(s => setLoginBtn(!!(s && s.visible)));
+  document.getElementById('dmClear').onclick = () => { dmList = []; dmSeenSet.clear(); dmLastBySrc.clear(); renderDanmaku(); };
   document.getElementById('dmRefresh').onclick = () => renderDanmaku();
   document.getElementById('dmStart').onclick = () => {
     dmInteractOn = !dmInteractOn;
@@ -2011,7 +2117,12 @@
     if (document.getElementById('aiVoice').checked) speakDanmaku(t, 'ai');
     aiLog('测试完成');
   };
-  window.api.onDanmaku(line => addDanmaku(line));
+  window.api.onDanmaku(line => {
+    dmStats.raw++;
+    renderDmDiag();
+    try { addDanmaku(line); }
+    catch (err) { dmLog('❌ 弹幕处理异常：' + String((err && err.message) || err)); }
+  });
   let dmAutoReadOn = false; // 取消后清掉已排队的弹幕朗读，正在播的自然读完
   document.getElementById('dmAutoRead').onchange = (e) => {
     dmAutoReadOn = e.target.checked;
@@ -2025,7 +2136,67 @@
   // 语音队列窗口点击「清空语音」→ 只清空等待队列，正在播报的继续播完
   window.api.onVoiceQueueClear(() => { clearVoiceQueue(); });
   window.api.onVoiceQueuePause((paused) => { paused ? pauseVoice() : resumeVoice(); });
-  window.api.onDanmakuStatus(m => { dmLog(m); setState('dmState', m); });
+  window.api.onDanmakuStatus(m => {
+    dmLog(m);
+    const full = String(m == null ? '' : m);
+    setState('dmState', dmShort(full, 160));
+    const el = document.getElementById('dmState');
+    if (el) el.title = full; // 长链接完整内容悬停可见
+  });
+  // ---- 采集诊断：健康状态 + WS 探针（纯展示，不影响弹幕投递） ----
+  function renderDmDiag(){
+    const el = document.getElementById('dmDiag');
+    if (!el) return;
+    const h = dmDiag.health, p = dmDiag.probe;
+    // 最关键的分界点：收到 0 = 采集层没送过来；收到>0 但显示 0 = 被去重/异常挡住
+    const parts = ['接收 ' + dmStats.raw + ' / 显示 ' + dmStats.shown];
+    if (h) {
+      const quiet = h.sinceLastMs > 20000 ? '，' + Math.round(h.sinceLastMs / 1000) + 's 无新消息' : '';
+      parts.push('采集器 ' + (h.container ? '✅ 已挂容器' : '⚠ 未找到容器') +
+        '，累计 ' + (h.msgs || 0) + ' 条，DOM变动 ' + (h.mutations || 0) + '，容器元素 ' + (h.containerEls || 0) + quiet +
+        (h.selfHeals ? '，自愈 ' + h.selfHeals + ' 次' : '') +
+        (h.containerCls ? '｜' + h.containerCls : '') +
+        (h.lastText ? '｜末条:' + h.lastText : ''));
+    }
+    if (p) {
+      const k = p.byKind || {};
+      parts.push('WS ' + (p.attached ? '✅' : '⚠') +
+        ' 帧 ' + (p.frames || 0) + '（推送帧 ' + (p.pushFrames || 0) + '）→ 解码 ' + (p.decoded || 0) +
+        '（聊天 ' + (k.chat || 0) + '/礼物 ' + (k.gift || 0) + '/点赞 ' + (k.like || 0) +
+        '/进场 ' + (k.enter || 0) + '/关注 ' + (k.follow || 0) + '）' +
+        '，未解帧 ' + (p.unparsed || 0) + '，丢弃 ' + (p.dropped || 0) +
+        (p.errors ? '，异常 ' + p.errors : '') +
+        (p.pushFrames > 0 && p.decoded === 0 ? '；帧样本已存 config/dm-frame-sample.json' : '') +
+        (!p.attached && p.error ? '｜' + p.error : ''));
+    }
+    const full = '采集诊断：' + parts.join('　｜　');
+    el.textContent = dmShort(full, 300);
+    el.title = full; // 完整诊断（含容器类名/长链接）悬停可见
+  }
+  if (window.api.onDanmakuHealth) window.api.onDanmakuHealth(h => {
+    const prev = dmDiag.health;
+    if (prev && prev.container !== false && h && h.container === false) dmLog('⚠ 采集器失去聊天容器，正在自动重挂…');
+    if (prev && h && h.selfHeals > prev.selfHeals) dmLog('🔄 采集器已自动重挂（第 ' + h.selfHeals + ' 次）');
+    dmDiag.health = h; renderDmDiag();
+  });
+  if (window.api.onDanmakuProbe) window.api.onDanmakuProbe(p => {
+    const prev = dmDiag.probe;
+    if (p && p.pushFrames > 0 && (!prev || prev.pushFrames === 0)) dmLog('✅ 已捕获弹幕推送帧，开始 protobuf 解码');
+    if (p && p.decoded > 0 && (!prev || prev.decoded === 0)) dmLog('✅ 结构化弹幕已接入（聊天/礼物/点赞/进场/关注），不再依赖 DOM 文本猜测');
+    dmDiag.probe = p; renderDmDiag();
+  });
+  // 自检：注入一条假弹幕，验证「去重 → IPC → 渲染」这段是否通；
+  // 点了列表能出现 = 采集层(DOM/WS)的问题；点了也不出现 = 下游渲染/去重的问题。
+  const selfTestBtn = document.getElementById('dmSelfTest');
+  if (selfTestBtn) selfTestBtn.onclick = async () => {
+    dmLog('🧪 注入一条测试弹幕…');
+    try {
+      const r = await window.api.injectTestDanmaku();
+      dmLog(r && r.ok ? '✅ 已送出，请看上方弹幕列表是否出现「测试观众」' : '⚠ 被去重挡下（可能刚注入过，稍等几秒再点）');
+    } catch (err) {
+      dmLog('❌ 自检调用失败：' + String((err && err.message) || err));
+    }
+  };
   dmLog('未连接，等待发起连接…');
 
   // ---- AI 配置：统一存到 config/client-config.json（localStorage 已废弃）----

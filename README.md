@@ -122,6 +122,72 @@ env -u ELECTRON_RUN_AS_NODE ./node_modules/electron/dist/Electron.app/Contents/M
 连接抖音直播间实时抓取弹幕（需在「显示登录窗口」里扫码登录），可选自动朗读。
 内置内容安全过滤：命中联系方式 / 网址 / 广告 / 敏感词等不朗读、不答疑，可用 `aiFilter` 追加自定义黑名单。
 
+> **直播间链接请优先填 `https://live.douyin.com/<房间号>` 直链**。
+> `v.douyin.com/xxx` 短链的落地页带 CSP，JS 跳转常被 Chromium 以 `ERR_BLOCKED_BY_CSP(-30)` 拦下。
+> 客户端会尝试把短链解析成直链（只接受解析到 `live.douyin.com` 的结果，否则交回窗口自行跳转），
+> 但解析不带登录 Cookie，最稳的还是直接填直链。
+
+采集器在 `src/preload-danmaku.js`，随文档启动（不再只在页面加载完注入一次）：
+- **推模式**：抓到即 `ipcRenderer.send`，不再 600ms 轮询，延迟从 ~600ms 降到 ~50ms
+- **只观察聊天容器**，容器用结构特征 `[data-index]` + 类名兜底定位，不写死 CSS Modules 哈希类名
+- **健康检查与自愈**：容器被替换/移除自动重挂，长时间静默会兜底重扫；状态显示在「连接进度」下方
+- **真实 msgId**（容器代次 + data-index），下游按消息精确去重，不再靠「用户名|正文 + 5 秒」猜
+- 隐藏窗口设了 `backgroundThrottling: false`，避免后台节流导致聊天虚拟列表不渲染
+
+### 结构化弹幕源：CDP 旁观 WebSocket 推送帧
+连接时主进程给弹幕窗口挂 CDP（`Network.enable`），**旁听页面自己已建立的 WSS**。
+`signature` / `a_bogus` / 心跳 / ACK 全由页面 JS 负责，这里只读帧、不解码发送、不发任何业务请求 ——
+抖音改协议时页面自动跟随，不用跟着修签名。
+
+解码链（[src/danmaku-proto.js](src/danmaku-proto.js)，**零依赖手写 protobuf wire 解码**，字段编号核对自
+[DouyinLiveWebFetcher 的 douyin.proto](https://github.com/leriocn/DouyinLiveWebFetcher/blob/main/protobuf/douyin.proto)）：
+
+```
+CDP payloadData(base64) → PushFrame{6:payloadEncoding, 8:payload} → (gzip)
+  → Response{1:messagesList} → Message{1:method, 2:payload, 3:msgId}
+  → WebcastChatMessage / GiftMessage / LikeMessage / MemberMessage / SocialMessage
+```
+
+解出的事件带 `kind`（chat/gift/like/enter/follow）、真实 `nickName`、礼物名与数量、真实 `msgId`。
+渲染层据此**直接判定类型**，不再用正则从 `innerText` 反推；`{礼物}` 模板用的是真实礼物名。
+
+| 来源 | 角色 |
+|---|---|
+| WS 解码 | **主源**，带结构化字段 |
+| DOM 采集器 | 兜底：WS 断流 8 秒后自动接管 |
+
+两源在 [src/danmaku-dedupe.js](src/danmaku-dedupe.js) 合流去重（内容 key 4s TTL、同源不同 msgId 放行、
+切换瞬间零重复），渲染层另有一层「仅跨源、1.5s」兜底。解码失败静默回退 DOM，不影响现有功能。
+
+诊断行会显示：`接收 / 显示`、`采集器状态`、`帧 / 推送帧 → 解码数（聊天/礼物/点赞/进场/关注）、未解帧、丢弃数`。
+`解码数 > 0` 即表示结构化弹幕已接入；`未解帧` 持续增长说明推送帧格式与预期不符（此时 DOM 兜底仍在工作）。
+
+排查零弹幕时先看 **`接收 / 显示`**：
+- `接收 0` → 采集层（DOM/WS）没把消息送到主界面，看后面的采集器状态与帧计数
+- `接收 > 0 但显示 0` → 消息到了但被去重/过滤/异常挡下
+- 两个都 > 0 → 其实已采到，检查列表是否被折叠或滚到了旧位置
+
+长链接与状态文本会**截断显示**（连接进度、诊断行、状态栏），完整内容鼠标悬停 `title` 可看，不会撑变形。
+
+若 `推送帧 > 0` 但 `解码 = 0`，说明真实帧封装与当前解析不符：客户端会把**前 6 帧的真实结构**
+写到 `config/dm-frame-sample.json`（含 hex 头、是否 gzip、解压后字段号等），把这个文件发出来即可反推格式。
+
+`未解帧` 是「推送帧里拆不出任何消息」的帧，绝大多数是**心跳/ACK 控制帧**（`Response` 里只有
+`needAck`/`heartbeatDuration`/`cursor`，没有 `messagesList`），不是弹幕，属正常现象。
+为确认，客户端会把前 8 个未解帧写到 `config/dm-frame-unparsed.json`，其中 `label` 字段：
+- `control/heartbeat(无消息)` → 心跳/ACK，可忽略
+- `unknown` → 这个才需要排查（格式真的不识别）
+
+诊断行右侧有 **🧪 自检** 按钮：注入一条假弹幕走完整链路，用来二分问题 ——
+点了列表能出现 = 采集层（DOM/WS）的问题；点了也不出现 = 下游渲染/去重的问题。
+
+默认开启，可在 `config/client-config.json` 的 `danmaku` 段加 `"probe": false`
+关闭整个旁听（含解码），此时自动退回纯 DOM 采集。
+
+> DOM 采集器**不假设 `data-index` 递增**：抖音聊天区是虚拟列表，`data-index` 常为可视行位置
+> （固定 0~N 循环复用）。去重改用「索引 + 文本」组合 key，同一行内容变了即视为新消息，
+> 否则容器一挂载就会把之后所有新弹幕误判成旧消息全部丢弃。
+
 ### AI 读弹幕答疑
 - 「使用模型」下拉直接从「🧩 模型配置」里选，不在本页重复填 Key
 - 开关：启用答疑 / 语音回复 / 文字显示

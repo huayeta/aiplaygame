@@ -25,10 +25,15 @@ contextBridge.exposeInMainWorld('api', {
   deleteVoice: (id) => ipcRenderer.invoke('ai:deleteVoice', id),
   updateVoice: (id, v) => ipcRenderer.invoke('ai:updateVoice', id, v),
   connectDanmaku: (url) => ipcRenderer.invoke('dm:connect', url),
-  showLoginWin: () => ipcRenderer.invoke('dm:showLogin'),
-  hideLoginWin: () => ipcRenderer.invoke('dm:hide'),
+  toggleLoginWin: () => ipcRenderer.invoke('dm:loginToggle'),
+  onDanmakuLoginVisible: (cb) => {
+    const l = (_e, s) => cb(s);
+    ipcRenderer.on('dm:loginVisible', l);
+    return () => ipcRenderer.removeListener('dm:loginVisible', l);
+  },
   disconnectDanmaku: () => ipcRenderer.invoke('dm:disconnect'),
   openFilterRule: () => ipcRenderer.invoke('dm:filterRule'),
+  injectTestDanmaku: () => ipcRenderer.invoke('dm:test'),
   openDeviceGuide: () => ipcRenderer.invoke('deviceGuide:open'),
   openDeviceDir: () => ipcRenderer.invoke('deviceDir:open'),
   openVoiceQueue: () => ipcRenderer.invoke('voiceQueue:open'),
@@ -61,5 +66,23 @@ contextBridge.exposeInMainWorld('api', {
     const l = (_e, msg) => cb(msg);
     ipcRenderer.on('dm:status', l);
     return () => ipcRenderer.removeListener('dm:status', l);
+  },
+  // 明确连接状态：驱动「连接直播间 / 断开」切换按钮
+  onDanmakuState: (cb) => {
+    const l = (_e, s) => cb(s);
+    ipcRenderer.on('dm:state', l);
+    return () => ipcRenderer.removeListener('dm:state', l);
+  },
+  // 采集器健康状态（容器是否挂载、累计条数、静默时长、自愈次数）
+  onDanmakuHealth: (cb) => {
+    const l = (_e, h) => cb(h);
+    ipcRenderer.on('dm:health', l);
+    return () => ipcRenderer.removeListener('dm:health', l);
+  },
+  // 阶段0 WS 探针（是否 attach 成功、WS 连接/帧计数）
+  onDanmakuProbe: (cb) => {
+    const l = (_e, p) => cb(p);
+    ipcRenderer.on('dm:probe', l);
+    return () => ipcRenderer.removeListener('dm:probe', l);
   }
 });
