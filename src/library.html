@@ -227,6 +227,10 @@
   .tpl-bind-row .bn { flex:1; min-width:120px; }
   .tpl-bind-row select { padding:6px 10px; border-radius:8px; border:1px solid #2a2d52; background:#0f1020; color:#e8e9f5; font-size:12px; }
   .tpl-bind-row label { font-size:12px; color:#9aa0c8; display:inline-flex; align-items:center; gap:5px; }
+  /* 「语音队列」是打开独立窗口的按钮，不是页内导航，样式区别于普通菜单项 */
+  .side-item.side-action { background: linear-gradient(135deg, rgba(139,92,255,.18), rgba(255,92,168,.18)); border: 1px dashed #8b5cff; cursor: pointer; justify-content: flex-start; }
+  .side-item.side-action:hover { background: linear-gradient(135deg, rgba(139,92,255,.32), rgba(255,92,168,.32)); }
+  .side-item.side-action .ext { margin-left: auto; font-size: 12px; color: #b9a0ff; }
 </style>
 </head>
 <body>
@@ -239,7 +243,8 @@
     <div class="side-item" id="navTpl">📋 配置模板</div>
     <div class="side-item" id="navVoice">🎤 声音克隆</div>
     <div class="side-item" id="navDevice">🔊 声音设备</div>
-    <button class="side-item" id="openVoiceQueue" style="border:none;cursor:pointer;text-align:left;background:#1c1e38;color:#e7e9f7;justify-content:flex-start;">🔊 语音队列</button>
+    <button class="side-item side-action" id="openVoiceQueue">🚀 语音队列 <span class="ext">↗</span></button>
+    <button class="side-item side-action" id="tplQuickOverwrite" title="把当前所有设置保存进正在使用的模板">🔁 一键覆盖模板 <span class="ext">💾</span></button>
     <div class="side-tip">小游戏直播客户端<br>录制回放 · AI 助播</div>
   </div>
   <div class="main">
@@ -471,6 +476,7 @@
           <label class="switch"><input type="checkbox" id="dmEvtwelcome" checked> 欢迎进入</label>
           <label class="switch"><input type="checkbox" id="dmEvtgift" checked> 感谢礼物</label>
           <label class="switch"><input type="checkbox" id="dmEvtlike" checked> 点赞感谢</label>
+          <label class="switch"><input type="checkbox" id="dmEvtfollow" checked> 感谢关注</label>
         </div>
         <div style="display:flex;flex-direction:column;gap:12px;">
           <div class="tpl"><div class="tpl-t">📋 欢迎语模板（每行一条，{昵称}替换用户名）</div>
@@ -486,6 +492,13 @@
             <textarea id="dmTplLike" rows="4">感谢{昵称}的点赞！
 谢谢{昵称}的支持
 感谢{昵称}，爱你哦！</textarea></div>
+          <div class="tpl"><div class="tpl-t">💜 感谢关注模板（{昵称}替换用户名）</div>
+            <textarea id="dmTplFollow" rows="6">感谢{昵称}的关注，比心～
+欢迎{昵称}加入，感谢关注！
+{昵称}关注啦，直播间的老粉了，谢谢支持
+谢谢{昵称}的关注，一起玩游戏呀
+感谢关注{昵称}，每天都会直播玩小游戏哦
+{昵称}的关注收到啦，爱你哟</textarea></div>
         </div>
         <div class="row" style="gap:12px;align-items:center;">
           <button class="dmb dmb-g" id="dmStart">开始互动</button>
@@ -1735,6 +1748,8 @@
     if (g) return { type: 'gift', name, gift: g[1] };
     // 内容含点赞/点了赞/赞了你 → 点赞
     if (/点赞|点了赞|赞了你/.test(content)) return { type: 'like', name };
+    // 内容含关注了主播/关注了 → 新关注（WS 解码的 follow 会带 kind，这里是 DOM 文本兜底）
+    if (/关注了(主播|)|新关注/.test(content)) return { type: 'follow', name };
     return null;
   }
   const DM_MASK_NAMES = ['一位观众', '有位朋友', '某个小伙伴', '刚来的朋友', '这位朋友', '直播间的小伙伴', '一位幸运观众', '路过的朋友'];
@@ -1789,6 +1804,7 @@
     let tpl = '';
     if (ev.type === 'welcome') tpl = dmPick(document.getElementById('dmTplWelcome').value, 'welcome');
     else if (ev.type === 'gift') tpl = dmPick(document.getElementById('dmTplGift').value, 'gift');
+    else if (ev.type === 'follow') tpl = dmPick(document.getElementById('dmTplFollow').value, 'follow');
     else tpl = dmPick(document.getElementById('dmTplLike').value, 'like');
     if (!tpl) return;
     dmEvtLast[ev.type] = now;
@@ -2197,6 +2213,21 @@
   document.getElementById('dmFilterRule').onclick = () => { window.api.openFilterRule(); };
   // 语音队列：点击打开独立窗口（队列快照由上方 885 行定时同步）
   document.getElementById('openVoiceQueue').onclick = () => { window.api.openVoiceQueue(); };
+  // 一键覆盖模板：把当前全部设置快照写进正在使用的模板（不切换、不新建）
+  document.getElementById('tplQuickOverwrite').onclick = async () => {
+    let act = '';
+    try { act = ((await window.api.tplList()) || {}).activeId || ''; } catch (e) {}
+    if (!act) { alert('当前没有正在使用的模板，请先到「📋 配置模板」页新建或选择一个模板'); return; }
+    if (!confirm('把当前的全部设置（TTS / 弹幕 / AI 等所有配置）覆盖到当前使用的模板上？')) return;
+    const r = await window.api.tplOverwrite(act);
+    if (r && r.ok) {
+      tplData = await window.api.tplList().catch(() => tplData);
+      const el = document.getElementById('tplActive');
+      if (el) { el.textContent = '已覆盖当前模板 ✓'; setTimeout(tplRender, 1200); }
+    } else {
+      alert('覆盖失败：' + ((r && r.error) || '未知错误'));
+    }
+  };
   // 语音队列窗口点击「清空语音」→ 只清空等待队列，正在播报的继续播完
   window.api.onVoiceQueueClear(() => { clearVoiceQueue(); });
   window.api.onVoiceQueuePause((paused) => { paused ? pauseVoice() : resumeVoice(); });
@@ -2320,8 +2351,8 @@
     },
     danmaku: {
       dmUrl: 'text', dmAutoRead: 'bool', dmAutoScroll: 'bool', dmCool: 'num', dmIFilter: 'bool',
-      dmEvtwelcome: 'bool', dmEvtgift: 'bool', dmEvtlike: 'bool',
-      dmTplWelcome: 'text', dmTplGift: 'text', dmTplLike: 'text'
+      dmEvtwelcome: 'bool', dmEvtgift: 'bool', dmEvtlike: 'bool', dmEvtfollow: 'bool',
+      dmTplWelcome: 'text', dmTplGift: 'text', dmTplLike: 'text', dmTplFollow: 'text'
     },
     extraAi: {
       aiVisionOn: 'bool' // AI答疑里之前漏存的画面识别开关
@@ -2408,6 +2439,9 @@
         lineGroups = defaultLineGroups();
       }
       renderLineGroups();
+      // 引擎相关的 UI（音色下拉、显示区块）必须按恢复后的引擎重建，
+      // 否则打开软件时引擎显示的是已存引擎、但音色下拉还是默认引擎的选项，两者不匹配
+      try { setEngineUI(document.getElementById('engineSel').value); } catch (e) {}
     } catch (e) { lineGroups = defaultLineGroups(); renderLineGroups(); }
   }
   // 首次使用的默认分类示例

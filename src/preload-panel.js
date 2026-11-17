@@ -6,7 +6,7 @@ contextBridge.exposeInMainWorld('panel', {
   recStop: () => ipcRenderer.send('rec:stop'),
   recUndo: () => ipcRenderer.send('rec:undo'),
   recClear: () => ipcRenderer.send('rec:clear'),
-  playStart: (startIdx) => ipcRenderer.send('play:start', startIdx || 1),
+  playStart: (startIdx, delaySec) => ipcRenderer.send('play:start', startIdx || 1, Math.max(0, Number(delaySec) || 0)),
   playStop: () => ipcRenderer.send('play:stop'),
   toggleMute: (muted) => ipcRenderer.invoke('game:mute', muted),
   aiStart: (cfg) => ipcRenderer.send('aiAgent:start', cfg),
@@ -20,11 +20,14 @@ contextBridge.exposeInMainWorld('panel', {
   capture: () => ipcRenderer.send('tpl:capture'),
   setOption: (patch) => ipcRenderer.send('option:set', patch),
   getOption: () => ipcRenderer.invoke('option:get'),
+  noteGet: () => ipcRenderer.invoke('note:get'),
+  noteSet: (text) => ipcRenderer.send('note:set', text),
   scriptInfo: () => ipcRenderer.invoke('script:info'),
   scriptReRecord: (idx) => ipcRenderer.send('script:reRecord', idx),
   scriptDeleteLevel: (idx) => ipcRenderer.send('script:deleteLevel', idx),
   scriptTest: (idx) => ipcRenderer.send('script:test', idx),
   onStatus: (cb) => ipcRenderer.on('status', (e, data) => cb(data)),
+  onCountdown: (cb) => ipcRenderer.on('play:countdown', (e, data) => cb(data)),
   onThinking: (cb) => ipcRenderer.on('ai-thinking', (e, data) => cb(data)),
   onLevels: (cb) => ipcRenderer.on('levels', (e, data) => cb(data))
 });

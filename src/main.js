@@ -52,7 +52,7 @@ const auto = {
   lastTapTime: 0,
   abort: false,
   highlight: 0, // 当前正在测试/推进的关（1 基，0=无）
-  options: { method: 'cdp', speed: 1, loop: true, threshold: 0.9, autoMark: false, freshStart: false, aiCmd: '', aiTextModel: '', aiVisionModel: '', aiHiRes: false }
+  options: { method: 'cdp', speed: 1, loop: false, threshold: 0.9, autoMark: false, freshStart: false, aiCmd: '', aiTextModel: '', aiVisionModel: '', aiHiRes: false }
 };
 const DEFAULT_OPTIONS = Object.assign({}, auto.options); // 自动玩默认配置（未单独设置的游戏用它）
 
@@ -97,7 +97,17 @@ function saveGameOptions() {
   for (const k of Object.keys(DEFAULT_OPTIONS)) {
     if (auto.options[k] !== base[k]) { diff[k] = auto.options[k]; hasDiff = true; }
   }
-  if (hasDiff) map[auto.gameId] = diff; else delete map[auto.gameId];
+  if (hasDiff) {
+    // 保留独立于 auto.options 的字段（如游戏备注 note），别被差异覆盖冲掉
+    const prev = map[auto.gameId];
+    if (prev && prev.note !== undefined) diff.note = prev.note;
+    map[auto.gameId] = diff;
+  } else {
+    // 无差异时也要保住 note（备注不该因为没有其他改动就丢失）
+    const prev = map[auto.gameId];
+    if (prev && prev.note !== undefined) map[auto.gameId] = { note: prev.note };
+    else delete map[auto.gameId];
+  }
   writeAutoplayConfig(map);
 }
 // ---------- 音色库 ----------
@@ -1189,7 +1199,26 @@ function stopAutoMark() {
 }
 
 // ---------- 回放 ----------
-async function startPlayback(startIdx = 1) {
+// 关卡开始前的可中断倒计时：每秒推一次剩余秒数给面板显示；停止/中止时立即返回 false。
+// 返回 true = 倒计时正常走完；false = 被中止（调用方应停止本关及后续）
+async function countdownBeforeLevel(seconds, levelNo) {
+  let remain = Math.max(0, Math.floor(Number(seconds) || 0));
+  if (!remain) {
+    if (panelWin && !panelWin.isDestroyed()) panelWin.webContents.send('play:countdown', { active: false });
+    return true;
+  }
+  if (panelWin && !panelWin.isDestroyed()) panelWin.webContents.send('play:countdown', { active: true, remain, level: levelNo });
+  const endAt = Date.now() + remain * 1000;
+  while (auto.playing && !auto.abort) {
+    const left = Math.max(0, Math.ceil((endAt - Date.now()) / 1000));
+    if (panelWin && !panelWin.isDestroyed()) panelWin.webContents.send('play:countdown', { active: true, remain: left, level: levelNo });
+    if (left <= 0) break;
+    await sleep(200); // 细粒度轮询，保证停止能及时中断
+  }
+  if (panelWin && !panelWin.isDestroyed()) panelWin.webContents.send('play:countdown', { active: false });
+  return auto.playing && !auto.abort;
+}
+async function startPlayback(startIdx = 1, delaySec = 0) {
   if (auto.playing) return;
   const file = path.join(SCRIPTS_DIR, auto.gameId + '.json');
   if (!fs.existsSync(file)) { setStatus('还没有该游戏的脚本，请先录制'); return; }
@@ -1204,6 +1233,12 @@ async function startPlayback(startIdx = 1) {
   while (auto.playing && !auto.abort) {
     const level = script.levels[li];
     if (level && level.taps.length) {
+      // 关卡开始前倒计时（每秒推送到面板显示；停止可立即中断）
+      if (delaySec > 0) {
+        setStatus('第 ' + (li + 1) + ' 关准备中：' + delaySec + ' 秒后开始…', { playing: true });
+        const go = await countdownBeforeLevel(delaySec, li + 1);
+        if (!go) break; // 倒计时期间被停止
+      }
       auto.highlight = li + 1; // 当前正在播的关高亮
       sendLevels();
       setStatus('自动玩 第 ' + (li + 1) + ' 关');
@@ -1221,6 +1256,7 @@ async function startPlayback(startIdx = 1) {
     }
   }
   auto.playing = false;
+  if (panelWin && !panelWin.isDestroyed()) panelWin.webContents.send('play:countdown', { active: false });
   if (auto.highlight) { auto.highlight = 0; sendLevels(); }
   setStatus(auto.abort ? '已停止' : '自动玩结束（已播完第 ' + script.levels.length + ' 关）');
 }
@@ -1286,6 +1322,8 @@ function testLevelAt(idx) {
   auto.abort = false; // 清除上次停止留下的标志
   auto.phase = 'test';
   auto.playing = true;
+  auto.highlight = idx + 1; // 选中高亮当前测试的关
+  sendLevels();
   setStatus('测试第 ' + (idx + 1) + ' 关（当前画面执行 ' + level.taps.length + ' 个点）…');
   (async () => {
     if (gameWin && !gameWin.isDestroyed()) gameWin.focus();
@@ -1296,6 +1334,7 @@ function testLevelAt(idx) {
     }
     auto.playing = false;
     auto.phase = '';
+    if (auto.highlight) { auto.highlight = 0; sendLevels(); } // 测试完取消高亮
     setStatus(auto.abort ? '测试已停止' : '第 ' + (idx + 1) + ' 关测试完成，已点击 ' + level.taps.length + ' 次');
   })();
 }
@@ -1339,6 +1378,7 @@ function deleteLevelAt(idx) {
 function stopPlayback() {
   auto.abort = true; // 无条件中止，回放/测试/推进都会被中断
   auto.playing = false;
+  if (panelWin && !panelWin.isDestroyed()) panelWin.webContents.send('play:countdown', { active: false }); // 隐藏倒计时
   if (auto.highlight) { auto.highlight = 0; sendLevels(); }
   setStatus('已停止');
 }
@@ -1699,8 +1739,21 @@ ipcMain.handle('script:info', () => buildLevelData());
 ipcMain.on('script:reRecord', (e, idx) => { reRecordAt(idx); sendLevels(); });
 ipcMain.on('script:deleteLevel', (e, idx) => { deleteLevelAt(idx); sendLevels(); });
 ipcMain.on('script:test', (e, idx) => testLevelAt(idx));
-ipcMain.on('play:start', (e, startIdx) => startPlayback(startIdx || 1));
+ipcMain.on('play:start', (e, startIdx, delaySec) => startPlayback(startIdx || 1, Math.max(0, Number(delaySec) || 0)));
 ipcMain.on('play:stop', stopPlayback);
+// 当前游戏的备注（面板多行输入框）：存到 autoplay.json 的 <gameId>.note，独立于 auto.options
+ipcMain.handle('note:get', () => {
+  if (!auto.gameId) return '';
+  try { const v = readAutoplayConfig()[auto.gameId]; return (v && typeof v.note === 'string') ? v.note : ''; } catch (e) { return ''; }
+});
+ipcMain.on('note:set', (e, text) => {
+  if (!auto.gameId) return;
+  const map = readAutoplayConfig();
+  const node = Object.assign({}, map[auto.gameId] || {});
+  node.note = String(text == null ? '' : text);
+  map[auto.gameId] = node;
+  writeAutoplayConfig(map);
+});
 ipcMain.handle('option:get', () => Object.assign({}, auto.options)); // 面板打开时按当前游戏加载
 ipcMain.on('option:set', (e, patch) => {
   auto.options = Object.assign(auto.options, patch);
