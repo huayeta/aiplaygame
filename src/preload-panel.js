@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld('panel', {
   getOption: () => ipcRenderer.invoke('option:get'),
   noteGet: () => ipcRenderer.invoke('note:get'),
   noteSet: (text) => ipcRenderer.send('note:set', text),
+  aiTplLoad: () => ipcRenderer.invoke('aiTpl:load'),
+  aiTplSave: (data) => ipcRenderer.invoke('aiTpl:save', data),
   scriptInfo: () => ipcRenderer.invoke('script:info'),
   scriptReRecord: (idx) => ipcRenderer.send('script:reRecord', idx),
   scriptDeleteLevel: (idx) => ipcRenderer.send('script:deleteLevel', idx),

@@ -97,15 +97,19 @@ function saveGameOptions() {
   for (const k of Object.keys(DEFAULT_OPTIONS)) {
     if (auto.options[k] !== base[k]) { diff[k] = auto.options[k]; hasDiff = true; }
   }
+  // 保留独立于 auto.options 的字段（游戏备注 note、AI 指令模板 aiCmdTemplates/aiCmdActive），
+  // 别被差异覆盖冲掉。这些字段由各自的 IPC 单独维护，不进 auto.options 差异计算。
+  const EXTRA_KEYS = ['note', 'aiCmdTemplates', 'aiCmdActive'];
+  const prev = map[auto.gameId];
+  const extras = {};
+  let hasExtra = false;
+  if (prev) for (const k of EXTRA_KEYS) {
+    if (prev[k] !== undefined) { extras[k] = prev[k]; hasExtra = true; }
+  }
   if (hasDiff) {
-    // 保留独立于 auto.options 的字段（如游戏备注 note），别被差异覆盖冲掉
-    const prev = map[auto.gameId];
-    if (prev && prev.note !== undefined) diff.note = prev.note;
-    map[auto.gameId] = diff;
+    map[auto.gameId] = Object.assign(diff, extras);
   } else {
-    // 无差异时也要保住 note（备注不该因为没有其他改动就丢失）
-    const prev = map[auto.gameId];
-    if (prev && prev.note !== undefined) map[auto.gameId] = { note: prev.note };
+    if (hasExtra) map[auto.gameId] = extras;
     else delete map[auto.gameId];
   }
   writeAutoplayConfig(map);
@@ -1326,16 +1330,20 @@ function testLevelAt(idx) {
   sendLevels();
   setStatus('测试第 ' + (idx + 1) + ' 关（当前画面执行 ' + level.taps.length + ' 个点）…');
   (async () => {
-    if (gameWin && !gameWin.isDestroyed()) gameWin.focus();
-    for (const t of level.taps) {
-      if (auto.abort) break;
-      await sleep(Math.max(0, t.delay) / auto.options.speed);
-      await doTap(t.x, t.y);
+    try {
+      if (gameWin && !gameWin.isDestroyed()) gameWin.focus();
+      for (const t of level.taps) {
+        if (auto.abort) break;
+        await sleep(Math.max(0, t.delay) / auto.options.speed);
+        await doTap(t.x, t.y);
+      }
+    } finally {
+      // 无论正常结束、中途停止还是抛异常，都确保取消高亮（避免残留假选中）
+      auto.playing = false;
+      auto.phase = '';
+      if (auto.highlight) { auto.highlight = 0; sendLevels(); }
+      setStatus(auto.abort ? '测试已停止' : '第 ' + (idx + 1) + ' 关测试完成，已点击 ' + level.taps.length + ' 次');
     }
-    auto.playing = false;
-    auto.phase = '';
-    if (auto.highlight) { auto.highlight = 0; sendLevels(); } // 测试完取消高亮
-    setStatus(auto.abort ? '测试已停止' : '第 ' + (idx + 1) + ' 关测试完成，已点击 ' + level.taps.length + ' 次');
   })();
 }
 
@@ -1753,6 +1761,25 @@ ipcMain.on('note:set', (e, text) => {
   node.note = String(text == null ? '' : text);
   map[auto.gameId] = node;
   writeAutoplayConfig(map);
+});
+// AI 指令模板：按游戏存 [{id,name,text}] + 当前选中的 id（aiCmdActive）
+ipcMain.handle('aiTpl:load', () => {
+  if (!auto.gameId) return { templates: [], activeId: '' };
+  const node = readAutoplayConfig()[auto.gameId] || {};
+  return {
+    templates: Array.isArray(node.aiCmdTemplates) ? node.aiCmdTemplates : [],
+    activeId: node.aiCmdActive || ''
+  };
+});
+ipcMain.handle('aiTpl:save', (e, data) => {
+  if (!auto.gameId) return { ok: false, error: '未打开游戏' };
+  const map = readAutoplayConfig();
+  const node = Object.assign({}, map[auto.gameId] || {});
+  node.aiCmdTemplates = Array.isArray(data && data.templates) ? data.templates : [];
+  node.aiCmdActive = (data && data.activeId) || '';
+  map[auto.gameId] = node;
+  writeAutoplayConfig(map);
+  return { ok: true };
 });
 ipcMain.handle('option:get', () => Object.assign({}, auto.options)); // 面板打开时按当前游戏加载
 ipcMain.on('option:set', (e, patch) => {
@@ -2801,6 +2828,76 @@ async function resolveShortLink(u) {
   return u;
 }
 
+// ---------- 直播间连接历史（config/dm-history.json） ----------
+// 结构：[{ url, name, ts }]，按最近连接时间倒序，最多 10 条
+const DM_HISTORY_FILE = path.join(CONFIG_DIR, 'dm-history.json');
+function readDmHistory() {
+  try { const v = JSON.parse(fs.readFileSync(DM_HISTORY_FILE, 'utf8')); return Array.isArray(v) ? v : []; } catch (e) { return []; }
+}
+function writeDmHistory(list) {
+  try { fs.mkdirSync(CONFIG_DIR, { recursive: true }); fs.writeFileSync(DM_HISTORY_FILE, JSON.stringify(list.slice(0, 10), null, 2), 'utf8'); } catch (e) {}
+}
+// 记录一次成功连接：更新或新增条目，置顶，并推送最新列表给界面
+function pushDmHistory(url, name) {
+  if (!url || !/^https?:\/\//.test(url)) return;
+  const list = readDmHistory();
+  const old = list.find(x => x.url === url);
+  const entry = { url, name: name || (old && old.name) || '', ts: Date.now() };
+  const rest = list.filter(x => x.url !== url);
+  writeDmHistory([entry, ...rest]);
+  toLibrary('dm:historyUpdated', readDmHistory());
+}
+// 从直播间页面提取主播名。页面有两种形态：
+// ① webcast.amemv.com/douyin/webcast/reflow（v.douyin.com 短链目标）：title 是「抖音」，
+//    但首屏 SSR 数据有 "nickname":"xxx"（owner 在最前）、还有
+//    <input name="shareTitle" value="大肥鱼的直播"> —— 服务器下发，最可靠
+// ② live.douyin.com 直连页：DOM 有主播昵称节点，但页面上「我的喜欢」等入口文本
+//    也会被宽松选择器误抓 → DOM 候选必须与 SSR/分享标题/页面标题交叉验证才接受
+// 验证过的实测案例：v.douyin.com/g4oJbpBwKls/ → 主播「大肥鱼」
+async function extractAnchorName(wc) {
+  try {
+    const script = '(' + function () {
+      function clean(s) {
+        s = String(s || '').trim();
+        if (!s || s === '抖音' || s === '抖音直播') return '';
+        // 剥掉标题里的站点/房间后缀：「大肥鱼的抖音直播间 - 抖音直播」→「大肥鱼」
+        // 顺序重要：先删「正在直播…」，否则「直播间?$」的可选匹配会把「正在直播」里的「直播」误删
+        s = s.replace(/\s*[-–—].*$/, '').replace(/正在直播.*$/, '').replace(/的?(抖音)?直播间?$/, '').trim();
+        if (!s || s === '抖音' || s === '抖音直播') return '';
+        return s.slice(0, 40);
+      }
+      // ① SSR 初始数据：第一个非空 nickname 即主播（reflow 页 owner 排在 user/访客之前）
+      var html = document.documentElement.innerHTML;
+      var re = /"nickname"\s*:\s*"((?:[^"\\]|\\.)*)"/g, m, ssr = '';
+      while ((m = re.exec(html)) !== null) {
+        var v = m[1];
+        try { if (v.indexOf('\\') >= 0) v = JSON.parse('"' + v + '"'); } catch (e) {}
+        v = clean(v);
+        if (v) { ssr = v; break; }
+      }
+      // ② 分享标题字段（reflow 页）：<input name="shareTitle" value="大肥鱼的直播">
+      var st = document.querySelector('input[name="shareTitle"]');
+      var share = clean(st && st.value);
+      if (ssr) return ssr;
+      if (share) return share;
+      // ③ live 直连页：页面标题（「大肥鱼的直播间 - 抖音直播」）比宽松 DOM 选择器可靠
+      var titleCand = clean(document.title);
+      if (titleCand) return titleCand;
+      // ④ 最后手段：DOM 昵称节点（无 SSR/分享/标题凭据时才用，可能误抓页面入口文本）
+      var sels = ['.webcast-anchor-nickname', '#living-anchor-info-nick', '[data-e2e="anchor-info"] [class*="nick"]', '#header [class*="nick"]'];
+      for (var j = 0; j < sels.length; j++) {
+        try {
+          var el = document.querySelector(sels[j]);
+          var t = clean(el && el.textContent);
+          if (t) return t;
+        } catch (e) {}
+      }
+      return '';
+    }.toString() + ')()';
+    return String(await wc.executeJavaScript(script, true) || '').trim();
+  } catch (e) { return ''; }
+}
+
 async function connectDanmaku(url) {
   const seq = ++dmConnectSeq;
   disconnectDanmaku();
@@ -2857,6 +2954,21 @@ async function connectDanmaku(url) {
     // 重定向后的 URL 常带一大串参数，只显示前 100 字，完整地址写进控制台日志
     console.log('[dm-loaded] ' + clipStr(finalUrl, 300));
     sendDmStatus('页面加载完成' + (finalUrl !== url ? '（' + clipStr(finalUrl, 100) + '）' : '') + '，弹幕采集器已随文档启动（推模式）…');
+    // 延迟提取主播名（4s 首次 + 12s 补捞：reflow 页首屏即有 SSR 数据；live 直连页昵称节点渲染较慢）
+    let anchorDone = '';
+    const tryExtract = (delay) => setTimeout(async () => {
+      if (danmakuWin !== win || win.isDestroyed() || anchorDone) return;
+      const name = await extractAnchorName(wc);
+      if (name) {
+        anchorDone = name;
+        pushDmHistory(finalUrl, name);
+        toLibrary('dm:anchorName', { url: finalUrl, name });
+        sendDmStatus('已连接：' + name + '（' + clipStr(finalUrl, 80) + '）');
+        console.log('[dm-anchor] ' + name + ' ← ' + clipStr(finalUrl, 200));
+      }
+    }, delay);
+    tryExtract(4000);
+    tryExtract(12000);
   });
   const loadTimeout = setTimeout(() => {
     if (!everLoaded) sendDmStatus('提示：页面加载较慢或未进入直播间，请确认链接是否有效 / 是否已扫码登录');
@@ -2897,6 +3009,20 @@ function disconnectDanmaku() {
 }
 
 ipcMain.handle('dm:connect', async (e, url) => { await connectDanmaku(String(url || '').trim()); return true; });
+// 直播间连接历史（打开设置页时读取）
+ipcMain.handle('dm:history', () => readDmHistory());
+// 删除单条（按 url）/ 清空全部连接历史
+ipcMain.handle('dm:historyDelete', (e, url) => {
+  const list = readDmHistory().filter(x => x.url !== url);
+  writeDmHistory(list);
+  toLibrary('dm:historyUpdated', list);
+  return list;
+});
+ipcMain.handle('dm:historyClear', () => {
+  writeDmHistory([]);
+  toLibrary('dm:historyUpdated', []);
+  return [];
+});
 // 登录窗口显隐合并为一个切换按钮：一次调用完成切换并返回最新可见状态
 ipcMain.handle('dm:loginToggle', () => {
   if (!danmakuWin || danmakuWin.isDestroyed()) return { exists: false, visible: false };

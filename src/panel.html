@@ -25,6 +25,20 @@
   /* AI 指令输入框：多行文本框，写长指令更舒服；可纵向拖动调整高度 */
   .aiCmdBox { resize: vertical; min-height: 66px; max-height: 200px; line-height: 1.55; font-family: inherit; display: block; }
   .aiCmdBox:focus { outline: none; border-color: #7c5cff; }
+  /* AI 指令模板 */
+  .aiTplBox { background: #0f1020; border: 1px solid #2a2d52; border-radius: 10px; padding: 9px 11px; margin-bottom: 10px; }
+  .aiTplHd { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #9aa0c8; margin-bottom: 7px; }
+  .aiTplAdd { flex: none; background: linear-gradient(135deg,#8b5cff,#ff5ca8); color: #fff; border: 0; border-radius: 7px; padding: 5px 10px; font-size: 12px; cursor: pointer; }
+  .aiTplAdd:hover { filter: brightness(1.15); }
+  .aiTplList { display: block; max-height: 260px; overflow-y: auto; }
+  .aiTplItem { position: relative; display: block; padding: 8px 30px 8px 10px; border-radius: 8px; background: #15162a; border: 1px solid #2a2d52; font-size: 12px; cursor: pointer; margin-bottom: 6px; }
+  .aiTplItem:hover { border-color: #8b5cff; }
+  .aiTplItem.active { background: linear-gradient(135deg, rgba(139,92,255,.3), rgba(255,92,168,.3)); border-color: #ff5ca8; color: #fff; }
+  .aiTplItem .aiTplText { color: #9aa0c8; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+  .aiTplItem.active .aiTplText { color: #e8e9f5; }
+  /* 删除 ✕ 漂浮在卡片右上角 */
+  .aiTplItem .aiTplDel { position: absolute; top: 5px; right: 5px; width: 20px; height: 20px; line-height: 18px; text-align: center; border: 1px solid rgba(255,107,138,.4); border-radius: 50%; background: rgba(15,16,32,.85); color: #ff6b8a; cursor: pointer; font-size: 12px; padding: 0; }
+  .aiTplItem .aiTplDel:hover { background: #e11d48; color: #fff; border-color: #e11d48; }
   .aiRow { display: flex; gap: 8px; }
   .aiRow button { flex: 1; }
   .aiGo { background: linear-gradient(135deg,#7c5cff,#5a3fd6); }
@@ -130,6 +144,13 @@
   <div class="sec">
     <div class="t">AI 智能决策（说一句，AI 看画面自己玩）</div>
     <textarea class="txt aiCmdBox" id="aiCmd" rows="3" placeholder="例如：帮我一直点开始按钮 / 自动过关 / 点击键盘上面的数字3一次"></textarea>
+    <div class="aiTplBox">
+      <div class="aiTplHd">
+        <button class="aiTplAdd" id="aiTplAdd" title="保存当前输入框的指令">💾 保存</button>
+      </div>
+      <div class="hint" style="margin:0 0 7px;">💾 指令模板（点选加载 · 高亮=使用中 · 再点一次取消）</div>
+      <div id="aiTplList" class="aiTplList"><span style="font-size:12px;color:#6b7094;">还没有模板，在上方输入框写好指令后点「保存」</span></div>
+    </div>
     <div class="row" style="margin-bottom:6px;"><span style="flex:none;width:56px;color:#9aa0c8;font-size:12px;">文本模型</span><select id="aiTextModel" style="flex:1;width:0;min-width:0;box-sizing:border-box;"></select></div>
     <div class="row" style="margin-bottom:8px;"><span style="flex:none;width:56px;color:#9aa0c8;font-size:12px;">视觉模型</span><select id="aiVisionModel" style="flex:1;width:0;min-width:0;box-sizing:border-box;"></select></div>
     <label class="check" style="margin-bottom:8px;"><input type="checkbox" id="aiHiRes"> 高清截图（Retina 原始分辨率，定位更清晰但更慢/更费 token）</label>
@@ -223,6 +244,117 @@
     // 恢复上次输入的 AI 指令（按游戏独立保存）
     if (opts.aiCmd) $('aiCmd').value = opts.aiCmd;
   });
+
+  // ---------- AI 指令模板：按游戏独立，点选加载 / 增删改 / 高亮当前使用 ----------
+  // 注意：Electron 里 window.prompt() 静默返回 null（配置模板页已踩坑），这里一律不用 prompt/confirm
+  let aiTplData = { templates: [], activeId: '' };
+  function aiTplSave() { if (window.panel.aiTplSave) window.panel.aiTplSave(aiTplData); }
+  const tplEsc = s => String(s == null ? '' : s).replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c]));
+  // 刷新保存按钮文字：有选中模板=保存当前模板，无选中=添加新模板
+  function aiTplRefreshBtns() {
+    const add = $('aiTplAdd');
+    if (add) add.textContent = aiTplData.activeId ? '💾 保存当前模板' : '＋ 添加新模板';
+  }
+  function aiTplRender() {
+    const box = $('aiTplList');
+    if (!box) return;
+    const list = aiTplData.templates || [];
+    if (!list.length) {
+      box.innerHTML = '<span style="font-size:12px;color:#6b7094;">还没有模板，在上方输入框写好指令后点「保存」</span>';
+    } else {
+      // 只显示指令内容（无名称），完整文本自动换行；删除 ✕ 漂浮右上角
+      box.innerHTML = list.map(t =>
+        '<div class="aiTplItem' + (t.id === aiTplData.activeId ? ' active' : '') + '" data-id="' + tplEsc(t.id) + '">' +
+          '<button class="aiTplDel" title="删除模板">✕</button>' +
+          '<div class="aiTplText">' + tplEsc(t.text || '') + '</div>' +
+        '</div>'
+      ).join('');
+      box.querySelectorAll('.aiTplItem').forEach(el => {
+        const id = el.dataset.id;
+        const t = list.find(x => x.id === id);
+        // 点卡片：未选中→加载内容+高亮；已选中→取消选中+清空输入框（回到添加模式）
+        el.onclick = (e) => {
+          if (e.target.closest('.aiTplDel')) return; // 删除按钮单独处理
+          if (aiTplData.activeId === id) {
+            aiTplData.activeId = '';
+            $('aiCmd').value = ''; // 取消选中 → 输入框清空，当成添加新模板
+            saveAiInputs();
+            aiTplSave(); aiTplRender(); aiTplRefreshBtns();
+            setStatusQuick('已取消选中，输入框已清空，可添加新模板');
+          } else {
+            $('aiCmd').value = t.text || '';
+            aiTplData.activeId = id;
+            saveAiInputs(); // 同步持久化 aiCmd
+            aiTplSave(); aiTplRender(); aiTplRefreshBtns();
+            setStatusQuick('已加载模板，可修改内容后点「保存当前模板」');
+          }
+        };
+        // 删除：二次点击确认（点一次变"确认?"，3 秒内再点才删，不用 confirm）
+        const delBtn = el.querySelector('.aiTplDel');
+        let armed = false;
+        delBtn.onclick = (e) => {
+          e.stopPropagation();
+          if (!armed) {
+            armed = true; delBtn.textContent = '确认?'; delBtn.style.color = '#fff';
+            setTimeout(() => { if (armed) { armed = false; delBtn.textContent = '✕'; delBtn.style.color = ''; } }, 3000);
+            return;
+          }
+          aiTplData.templates = aiTplData.templates.filter(x => x.id !== id);
+          if (aiTplData.activeId === id) {
+            aiTplData.activeId = '';
+            $('aiCmd').value = ''; // 删掉正在用的模板 → 输入框清空，回到"添加新模板"模式
+            saveAiInputs();
+          }
+          aiTplSave(); aiTplRender(); aiTplRefreshBtns();
+          setStatusQuick('已删除模板');
+        };
+      });
+    }
+    aiTplRefreshBtns();
+  }
+  // 轻量状态提示（复用状态栏，不打断流程）
+  function setStatusQuick(msg) {
+    const box = $('statusList');
+    if (!box || !msg) return;
+    if (box.firstChild && box.firstChild.classList && box.firstChild.classList.contains('status-empty')) box.innerHTML = '';
+    const item = document.createElement('span');
+    item.className = 'status-item';
+    const d = new Date();
+    const ts = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2) + ':' + ('0' + d.getSeconds()).slice(-2);
+    item.innerHTML = '<span class="st-time">' + ts + '</span>' + tplEsc(msg);
+    box.prepend(item);
+    while (box.children.length > 60) box.removeChild(box.lastChild);
+  }
+  if (window.panel.aiTplLoad) {
+    window.panel.aiTplLoad().then(d => {
+      aiTplData = d || { templates: [], activeId: '' };
+      aiTplRender();
+      // 有选中模板时，用它的指令覆盖输入框（与高亮保持一致）
+      if (aiTplData.activeId) {
+        const act = (aiTplData.templates || []).find(t => t.id === aiTplData.activeId);
+        if (act) $('aiCmd').value = act.text || '';
+      }
+      aiTplRefreshBtns();
+    }).catch(() => {});
+  }
+  // 保存按钮：有选中模板 → 保存当前模板；无选中 → 添加为新模板（均无需名称）
+  $('aiTplAdd').onclick = () => {
+    const text = $('aiCmd').value.trim();
+    if (!text) { setStatusQuick('输入框是空的，先写点指令再保存'); return; }
+    if (aiTplData.activeId) {
+      // 修改完输入框内容 → 保存到当前选中的模板
+      const t = (aiTplData.templates || []).find(x => x.id === aiTplData.activeId);
+      if (t) { t.text = text; aiTplSave(); aiTplRender(); aiTplRefreshBtns(); setStatusQuick('已保存修改到当前模板'); }
+      else { aiTplData.activeId = ''; aiTplRefreshBtns(); }
+    } else {
+      // 添加新模板（纯内容，无需名称）
+      const id = 'at' + Date.now();
+      aiTplData.templates.push({ id, text });
+      aiTplData.activeId = id; // 新增后即高亮它
+      aiTplSave(); aiTplRender(); aiTplRefreshBtns();
+      setStatusQuick('已添加新模板');
+    }
+  };
 
   // 游戏备注：打开时加载，输入后防抖 500ms 自动保存（按游戏独立）
   if (window.panel.noteGet) {

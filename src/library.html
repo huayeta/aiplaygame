@@ -111,6 +111,12 @@
   .dmb-b:hover { background: #34376a; }
   .dmb:disabled { opacity: .5; cursor: not-allowed; }
   .dm-inter { margin-top: 16px; background: #15162a; border: 1px solid #2a2d52; border-radius: 14px; padding: 14px 18px; }
+  /* 直播间连接历史 chip */
+  .dm-hist-chip { display: inline-flex; align-items: center; max-width: 260px; padding: 3px 10px; border-radius: 999px; background: #0f1020; border: 1px solid #2a2d52; color: #c6cbf0; font-size: 12px; cursor: pointer; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .dm-hist-chip:hover { border-color: #38bdf8; color: #fff; }
+  .dm-hist-chip .nm { color: #22d39a; margin-right: 6px; }
+  .dm-hist-del { color: #e11d48; margin-left: 6px; cursor: pointer; font-weight: 700; }
+  .dm-hist-del:hover { color: #ff6b8a; }
   .dm-inter h3 { font-size: 15px; margin-bottom: 6px; }
   .dm-inter .row { margin-top: 10px; }
   .dm-inter .tpl { flex: 1; min-width: 0; }
@@ -231,6 +237,12 @@
   .side-item.side-action { background: linear-gradient(135deg, rgba(139,92,255,.18), rgba(255,92,168,.18)); border: 1px dashed #8b5cff; cursor: pointer; justify-content: flex-start; }
   .side-item.side-action:hover { background: linear-gradient(135deg, rgba(139,92,255,.32), rgba(255,92,168,.32)); }
   .side-item.side-action .ext { margin-left: auto; font-size: 12px; color: #b9a0ff; }
+  /* 左侧：当前模板状态 */
+  .side-tpl-box { margin-top: 6px; padding: 10px 12px; border-radius: 10px; background: #101123; border: 1px solid #2a2d52; cursor: pointer; transition: border-color .15s; }
+  .side-tpl-box:hover { border-color: #8b5cff; }
+  .side-tpl-label { font-size: 11px; color: #6b7094; margin-bottom: 3px; }
+  .side-tpl-name { font-size: 13px; color: #e8e9f5; font-weight: 600; word-break: break-all; }
+  .side-tpl-dirty { font-size: 11px; color: #ffb454; margin-top: 5px; }
 </style>
 </head>
 <body>
@@ -245,6 +257,11 @@
     <div class="side-item" id="navDevice">🔊 声音设备</div>
     <button class="side-item side-action" id="openVoiceQueue">🚀 语音队列 <span class="ext">↗</span></button>
     <button class="side-item side-action" id="tplQuickOverwrite" title="把当前所有设置保存进正在使用的模板">🔁 一键覆盖模板 <span class="ext">💾</span></button>
+    <div id="sideTplBox" class="side-tpl-box" title="点击前往配置模板页">
+      <div class="side-tpl-label">当前模板</div>
+      <div class="side-tpl-name" id="sideTplName">未使用模板</div>
+      <div class="side-tpl-dirty" id="sideTplDirty" style="display:none;">● 有未保存的修改，点此保存</div>
+    </div>
     <div class="side-tip">小游戏直播客户端<br>录制回放 · AI 助播</div>
   </div>
   <div class="main">
@@ -446,8 +463,13 @@
       <p class="sub">连接抖音直播间实时抓取弹幕，可选自动朗读。首次需在「显示登录窗口」里扫码登录。</p>
       <div class="row field">
         <span class="label" style="flex:none;margin:0;">直播间链接</span>
-        <input type="text" id="dmUrl" style="flex:1;" placeholder="https://live.douyin.com/ 或直播间网页地址">
+        <input type="text" id="dmUrl" style="flex:1;" placeholder="直播间链接 / 直播间数字短号（纯数字自动拼链接）">
         <button class="dmb dmb-g" id="dmConnect">🔗 连接直播间</button>
+      </div>
+      <div id="dmAnchor" style="display:none;margin:-4px 0 8px;font-size:13px;color:#22d39a;">📺 主播：<b id="dmAnchorName"></b></div>
+      <div id="dmHistoryBox" style="display:none;margin:-4px 0 10px;font-size:12px;color:#9aa0c8;">
+        🕘 最近连接：
+        <span id="dmHistoryChips" style="display:inline-flex;flex-wrap:wrap;gap:6px;vertical-align:middle;"></span>
       </div>
       <div class="row field" style="gap:12px;align-items:center;">
         <button class="dmb dmb-b" id="dmLoginToggle">👁 显示登录窗口</button>
@@ -611,6 +633,18 @@
           <div class="actions">
             <button class="ghost" id="tplModalCancel" style="background:#2a2d52;color:#cfd2ee;">取消</button>
             <button class="primary" id="tplModalOk" style="background:linear-gradient(135deg,#8b5cff,#ff5ca8);color:#fff;">确定</button>
+          </div>
+        </div>
+      </div>
+      <!-- 切换模板前：未保存改动的三选确认弹窗 -->
+      <div id="tplConfirmMask" class="modal-mask" style="z-index:1002;display:none;">
+        <div class="modal">
+          <h3 id="tplConfirmTitle">当前模板有未保存的修改</h3>
+          <p id="tplConfirmDesc" style="font-size:13px;color:#9aa0c8;line-height:1.7;margin:8px 0 4px;"></p>
+          <div class="actions" style="flex-direction:column;gap:8px;margin-top:16px;">
+            <button class="primary" id="tplConfirmSave" style="background:linear-gradient(135deg,#8b5cff,#ff5ca8);color:#fff;">💾 保存修改到当前模板，然后切换</button>
+            <button class="ghost" id="tplConfirmDiscard" style="background:#2a2d52;color:#cfd2ee;">↩ 不保存，直接切换</button>
+            <button class="ghost" id="tplConfirmCancel" style="background:transparent;color:#9aa0c8;border:1px solid #2a2d52;">取消切换</button>
           </div>
         </div>
       </div>
@@ -2118,6 +2152,7 @@
     } else {
       btn.textContent = '🔗 连接直播间';
       btn.classList.add('dmb-g');
+      if (dmConnState !== 'connecting') dmShowAnchor(''); // 断开/空闲时隐藏主播名
     }
   }
   if (window.api.onDanmakuState) window.api.onDanmakuState(s => {
@@ -2141,8 +2176,11 @@
       return;
     }
     if (dmConnState === 'connecting') return; // 防重复点击
-    const url = document.getElementById('dmUrl').value.trim();
-    if (!url) { setState('dmState', '请输入直播间链接', true); return; }
+    const urlRaw = document.getElementById('dmUrl').value.trim();
+    if (!urlRaw) { setState('dmState', '请输入直播间链接或抖音号', true); return; }
+    // 纯数字 = 直播间短号/抖音号，自动拼接完整链接（例：45860971391 → live.douyin.com/45860971391）
+    const url = (/^\d{5,20}$/.test(urlRaw)) ? ('https://live.douyin.com/' + urlRaw) : urlRaw;
+    document.getElementById('dmUrl').value = url; // 回填拼接结果，方便看到实际连的是哪个房
     dmList = []; dmSeenSet.clear(); dmLastBySrc.clear(); renderDanmaku(); // 重新连接时清空弹幕与去重池
     dmStats.raw = 0; dmStats.shown = 0;
     dmDiag.health = null; dmDiag.probe = null; renderDmDiag(); // 清掉上一次的诊断残留
@@ -2157,6 +2195,62 @@
       dmLog('❌ 连接调用失败：' + String((err && err.message) || err));
     }
   };
+  // ---------- 直播间连接历史 + 主播名 ----------
+  // 渲染历史 chips（最多 8 个）；点击 chip = 回填链接并直接连接；× = 删除该条
+  function dmRenderHistory(list) {
+    const box = document.getElementById('dmHistoryBox');
+    const chips = document.getElementById('dmHistoryChips');
+    if (!box || !chips) return;
+    list = (list || []).slice(0, 8);
+    if (!list.length) { box.style.display = 'none'; return; }
+    box.style.display = 'block';
+    chips.innerHTML = '';
+    list.forEach(h => {
+      const chip = document.createElement('span');
+      chip.className = 'dm-hist-chip';
+      chip.title = h.url;
+      const body = document.createElement('span');
+      body.innerHTML = (h.name ? '<span class="nm">' + h.name.replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c])) + '</span>' : '') + h.url.replace(/^https?:\/\//, '').slice(0, 30);
+      body.onclick = () => {
+        document.getElementById('dmUrl').value = h.url;
+        document.getElementById('dmConnect').click(); // 复用连接按钮逻辑
+      };
+      const del = document.createElement('b');
+      del.className = 'dm-hist-del';
+      del.textContent = '✕';
+      del.title = '删除这条记录';
+      del.onclick = (e) => { e.stopPropagation(); if (window.api.dmHistoryDelete) window.api.dmHistoryDelete(h.url); };
+      chip.appendChild(body);
+      chip.appendChild(del);
+      chips.appendChild(chip);
+    });
+    // 清空全部
+    const clear = document.createElement('span');
+    clear.className = 'dm-hist-del';
+    clear.style.cssText = 'color:#9aa0c8;cursor:pointer;font-size:12px;';
+    clear.textContent = '🗑 清空';
+    clear.title = '清空全部连接历史';
+    clear.onclick = () => { if (confirm('清空全部连接历史？')) window.api.dmHistoryClear(); };
+    chips.appendChild(clear);
+  }
+  // 主播名显示：提取到就显示，断开时隐藏
+  function dmShowAnchor(name) {
+    const box = document.getElementById('dmAnchor');
+    if (!box) return;
+    if (name) {
+      document.getElementById('dmAnchorName').textContent = name;
+      box.style.display = 'block';
+    } else {
+      box.style.display = 'none';
+    }
+  }
+  (async () => {
+    if (!window.api.onDmHistory) return; // 旧 preload 兼容
+    try { dmRenderHistory(await window.api.dmHistory()); } catch (e) {}
+    window.api.onDmHistory(list => dmRenderHistory(list));
+    window.api.onDmAnchorName(d => dmShowAnchor(d && d.name));
+  })();
+
   // 登录窗口显隐：单按钮切换（显示 ↔ 隐藏），状态由主进程 dm:loginVisible 同步
   function setLoginBtn(visible) {
     const b = document.getElementById('dmLoginToggle');
@@ -2226,6 +2320,7 @@
     if (!confirm('把当前的全部设置（TTS / 弹幕 / AI 等所有配置）覆盖到当前使用的模板上？')) return;
     const r = await window.api.tplOverwrite(act);
     if (r && r.ok) {
+      tplMarkBaseline(); // 覆盖后重建基线，清掉 dirty 提醒
       tplData = await window.api.tplList().catch(() => tplData);
       const el = document.getElementById('tplActive');
       if (el) { el.textContent = '已覆盖当前模板 ✓'; setTimeout(tplRender, 1200); }
@@ -2388,6 +2483,44 @@
     }
   }
 
+  // ---------- 模板 dirty 检测：加载/覆盖模板后记录配置基线，改动后对比判断是否"未保存进模板" ----------
+  let tplActiveId = '';       // 当前使用的模板 id（''=未使用模板）
+  let tplActiveName = '';     // 当前模板名称
+  let tplBaseline = null;     // 基线快照（JSON 字符串），null=尚未建立
+  let tplDirty = false;       // 是否有未保存进模板的修改
+  // 收集当前所有绑定字段为快照字符串（与 cfgSaveAllDebounced 的收集逻辑一致）
+  function cfgSnapshot() {
+    const patch = {};
+    for (const group of Object.keys(CFG_BINDINGS)) {
+      const obj = {};
+      for (const [id, type] of Object.entries(CFG_BINDINGS[group])) {
+        const v = cfgReadControl(id, type);
+        if (v !== undefined) obj[id] = v;
+      }
+      if (group === 'extraAi') patch.aiChat = obj; else patch[group] = obj;
+    }
+    return JSON.stringify(patch);
+  }
+  // 刷新左侧栏的当前模板显示（含 dirty 标记）
+  function tplRenderSide() {
+    const nameEl = document.getElementById('sideTplName');
+    const dirtyEl = document.getElementById('sideTplDirty');
+    if (!nameEl || !dirtyEl) return;
+    nameEl.textContent = tplActiveId ? tplActiveName : '未使用模板';
+    dirtyEl.style.display = (tplActiveId && tplDirty) ? 'block' : 'none';
+  }
+  // 建立基线（加载模板 / 覆盖模板 / 启动初始化后调用）
+  function tplMarkBaseline() {
+    tplBaseline = cfgSnapshot();
+    tplDirty = false;
+    tplRenderSide();
+  }
+  // 配置变更后检测：与基线不同即标记 dirty（仅在使用模板时）
+  function tplCheckDirty() {
+    if (!tplActiveId || tplBaseline == null) { tplDirty = false; tplRenderSide(); return; }
+    const nowDirty = cfgSnapshot() !== tplBaseline;
+    if (nowDirty !== tplDirty) { tplDirty = nowDirty; tplRenderSide(); }
+  }
   // 保存：防抖 400ms，把所有绑定字段收集成 {tts:{...}, danmaku:{...}, aiChat:{...}}
   let cfgSaveTimer = null;
   function cfgSaveAllDebounced() {
@@ -2404,6 +2537,7 @@
         else patch[group] = obj;
       }
       try { window.api.cfgSave(patch); } catch (e) {}
+      tplCheckDirty(); // 配置已变 → 检测是否偏离模板基线
     }, 400);
   }
 
@@ -2468,16 +2602,27 @@
     ];
   }
   // 延迟一点加载，确保动态填充的 select（音色列表等）先就绪再回填
-  setTimeout(cfgLoadAll, 600);
-  // 加载模板后主进程会通知界面重新回填所有控件
-  if (window.api.onTemplateLoaded) window.api.onTemplateLoaded((d) => {
-    cfgLoadAll();
-    if (d && d.id) {
-      const el = document.getElementById('tplActive');
-      if (el) el.textContent = '当前模板：' + d.id;
-    }
+  setTimeout(async () => {
+    await cfgLoadAll();
+    // 启动初始化：拉取当前使用的模板，建立基线（这样之后的改动才能正确标 dirty）
+    try {
+      const d = await window.api.tplList() || {};
+      tplActiveId = d.activeId || '';
+      const cur = (d.templates || []).find(t => t.id === tplActiveId);
+      tplActiveName = cur ? cur.name : tplActiveId;
+    } catch (e) { tplActiveId = ''; tplActiveName = ''; }
+    tplMarkBaseline();
+    tplRenderSide();
+  }, 600);
+  // 加载模板后主进程会通知界面重新回填所有控件（含游戏启动时自动加载）
+  if (window.api.onTemplateLoaded) window.api.onTemplateLoaded(async (d) => {
+    await cfgLoadAll();
+    tplMarkBaseline(); // 自动加载的模板，以当前配置为新基线（不算 dirty）
     tplRender();
   });
+  // 左侧当前模板显示区：点击跳转到配置模板页
+  const sideTplBox = document.getElementById('sideTplBox');
+  if (sideTplBox) sideTplBox.onclick = () => setNav('tpl');
 
   // ---------- 配置模板页 ----------
   let tplData = { activeId: '', templates: [] };
@@ -2519,6 +2664,27 @@
       setTimeout(() => { try { input.focus(); input.select(); } catch (e) {} }, 50);
     });
   }
+  // 三选确认弹窗：返回 'save' | 'discard' | 'cancel'
+  function tplConfirm(opt) {
+    return new Promise(resolve => {
+      const mask = document.getElementById('tplConfirmMask');
+      if (!mask) return resolve('cancel');
+      document.getElementById('tplConfirmTitle').textContent = opt.title || '当前模板有未保存的修改';
+      document.getElementById('tplConfirmDesc').textContent = opt.desc || '';
+      document.getElementById('tplConfirmSave').style.display = opt.canSave ? '' : 'none';
+      mask.style.display = 'flex';
+      let done = false;
+      const finish = (v) => {
+        if (done) return; done = true;
+        mask.style.display = 'none';
+        ['tplConfirmSave', 'tplConfirmDiscard', 'tplConfirmCancel'].forEach(id => { document.getElementById(id).onclick = null; });
+        resolve(v);
+      };
+      document.getElementById('tplConfirmSave').onclick = () => finish('save');
+      document.getElementById('tplConfirmDiscard').onclick = () => finish('discard');
+      document.getElementById('tplConfirmCancel').onclick = () => finish('cancel');
+    });
+  }
   const tplEsc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   function tplFmtTime(ts) {
     if (!ts) return '—';
@@ -2529,8 +2695,13 @@
     try { tplData = await window.api.tplList() || { activeId: '', templates: [] }; } catch (e) { tplData = { activeId: '', templates: [] }; }
     const box = document.getElementById('tplList');
     if (!box) return;
+    // 同步当前模板状态到左侧栏（名称 + dirty 提醒）
+    tplActiveId = tplData.activeId || '';
+    const curTpl = (tplData.templates || []).find(t => t.id === tplActiveId);
+    tplActiveName = curTpl ? curTpl.name : tplActiveId;
+    tplRenderSide();
     const act = document.getElementById('tplActive');
-    if (act) act.textContent = tplData.activeId ? ('当前模板：' + tplData.activeId) : '当前：未使用模板（直接编辑的当前配置）';
+    if (act) act.textContent = tplActiveId ? ('当前模板：' + tplActiveName + (tplDirty ? '　⚠ 有未保存的修改' : '')) : '当前：未使用模板（直接编辑的当前配置）';
     const list = tplData.templates || [];
     if (!list.length) {
       box.innerHTML = '<div style="color:#9aa0c8;font-size:13px;">还没有模板。点上方「保存当前为新模板」把现在这套配置存一份，或「添加空白模板」。</div>';
@@ -2593,13 +2764,27 @@
   async function tplAction(act, id) {
     const t = (tplData.templates || []).find(x => x.id === id) || {};
     if (act === 'load') {
-      if (!confirm('加载模板「' + (t.name || id) + '」？当前未保存的配置改动会被覆盖。')) return;
+      // 切换前：当前模板若有未保存的修改，先问要不要存
+      if (tplActiveId && tplActiveId !== id && tplDirty) {
+        const choice = await tplConfirm({
+          title: '当前模板「' + tplActiveName + '」有未保存的修改',
+          desc: '检测到你改过配置但还没保存进当前模板。切换到「' + (t.name || id) + '」之前，要先保存吗？',
+          canSave: true
+        });
+        if (choice === 'cancel') return;
+        if (choice === 'save') {
+          const sv = await window.api.tplOverwrite(tplActiveId);
+          if (!sv || !sv.ok) { alert('保存当前模板失败：' + ((sv && sv.error) || '未知错误') + '，已取消切换'); return; }
+        }
+      } else if (!confirm('加载模板「' + (t.name || id) + '」？当前配置会被这份模板覆盖。')) return;
       const r = await window.api.tplLoad(id);
       if (!r || !r.ok) alert('加载失败：' + ((r && r.error) || '未知错误'));
+      else { await cfgLoadAll(); tplMarkBaseline(); } // 回填后重建基线（清掉 dirty）
     } else if (act === 'overwrite') {
       if (!confirm('用「当前配置」覆盖模板「' + (t.name || id) + '」？')) return;
       const r = await window.api.tplOverwrite(id);
       if (!r || !r.ok) alert('覆盖失败：' + ((r && r.error) || '未知错误'));
+      else tplMarkBaseline(); // 覆盖后当前配置=模板，重建基线
     } else if (act === 'copy') {
       const v = await tplPrompt({ title: '复制模板', label: '新模板名称', value: (t.name || '模板') + ' 副本', withNote: true, note: t.note || '' });
       if (!v || !v.name || !v.name.trim()) return;

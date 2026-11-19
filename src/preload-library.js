@@ -98,5 +98,19 @@ contextBridge.exposeInMainWorld('api', {
     const l = (_e, p) => cb(p);
     ipcRenderer.on('dm:probe', l);
     return () => ipcRenderer.removeListener('dm:probe', l);
+  },
+  // 直播间连接历史：读取 + 订阅更新（连接成功/主播名提取到时推送）
+  dmHistory: () => ipcRenderer.invoke('dm:history'),
+  dmHistoryDelete: (url) => ipcRenderer.invoke('dm:historyDelete', url),
+  dmHistoryClear: () => ipcRenderer.invoke('dm:historyClear'),
+  onDmHistory: (cb) => {
+    const l = (_e, list) => cb(list);
+    ipcRenderer.on('dm:historyUpdated', l);
+    return () => ipcRenderer.removeListener('dm:historyUpdated', l);
+  },
+  onDmAnchorName: (cb) => {
+    const l = (_e, d) => cb(d);
+    ipcRenderer.on('dm:anchorName', l);
+    return () => ipcRenderer.removeListener('dm:anchorName', l);
   }
 });
